@@ -58,24 +58,42 @@ def show_box(box, ax):
     ax.add_patch(plt.Rectangle((x0, y0), w, h, edgecolor='green', facecolor=(0, 0, 0, 0), lw=2))
 
 
-def add_new_obj(ann_frame_idx, ann_obj_id, points=None, labels=None, box=None, predictor=None):
+def add_new_obj(ann_frame_idx, ann_obj_id, points=None, labels=None, box=None, mask=None, predictor=None, inference_state=None):
     try:
         ann_frame_idx = ann_frame_idx  # the frame index we interact with
         ann_obj_id = ann_obj_id  # give a unique id to each object we interact with (it can be any integers)
 
-        # Let's add a positive click at (x, y) to get started
-        points = np.array(points, dtype=np.float32) if labels is not None else None
-        # for labels, `1` means positive click and `0` means negative click
-        labels = np.array(labels, np.int32) if labels is not None else None
+        if points is not None or box is not None:
+            # Let's add a positive click at (x, y) to get started
+            points = np.array(points, dtype=np.float32) if labels is not None else None
+            # for labels, `1` means positive click and `0` means negative click
+            labels = np.array(labels, np.int32) if labels is not None else None
 
-        _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
-            inference_state=inference_state,
-            frame_idx=ann_frame_idx,
-            obj_id=ann_obj_id,
-            points=points,
-            labels=labels,
-            box=box,
-        )
+            _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
+                inference_state=inference_state,
+                frame_idx=ann_frame_idx,
+                obj_id=ann_obj_id,
+                points=points,
+                labels=labels,
+                box=box,
+            )
+
+        if mask is not None:
+            # 1. 将 OpenCV 掩码 (0,255) 转换为二进制 (0,1)
+            binary_mask = (mask > 128).astype(np.uint8)  # 阈值化
+            
+            # 2. 转换为 PyTorch 张量，并转为布尔类型
+            mask_tensor = torch.from_numpy(binary_mask).to(torch.bool)
+            
+            # 检查形状是否为 (H, W)
+            assert mask_tensor.dim() == 2, f"Mask must be 2D, got {mask_tensor.shape}"
+
+            _, out_obj_ids, out_mask_logits = predictor.add_new_mask(
+                inference_state=inference_state,
+                frame_idx=ann_frame_idx,
+                obj_id=ann_obj_id,
+                mask=mask_tensor,
+            )
     except Exception as e:
         raise e  # 主动抛出错误
     
@@ -179,7 +197,7 @@ def merge_masks(masks_dict, compare_masks_dict=None, iou_threshold=0.5):
     """
     merged_mask = {}
     
-    # 如果没有对比帧，直接合并所有masks
+    # 如果没有对比帧，直接返回masks_dict
     if compare_masks_dict is None:
         return masks_dict
     
@@ -194,11 +212,11 @@ def merge_masks(masks_dict, compare_masks_dict=None, iou_threshold=0.5):
         # 计算IoU（忽略全零mask的情况）
         if np.any(compare_binary) or np.any(mask_binary):
             iou = compute_mask_iou(compare_binary.flatten(), mask_binary.flatten())
-            if iou < 1.0:
-                print(f"iou: {iou}")
+            # if iou < 1.0:
+            #     print(f"iou: {iou}")
             if iou <= iou_threshold:
                 # 仅合并低IoU的物体
-                print("合并")
+                # print("合并")
                 merged_mask[obj_id] = mask
     
     return merged_mask
@@ -231,7 +249,10 @@ def compute_mask_iou(mask1, mask2):
     """
     intersection = np.logical_and(mask1 > 0, mask2 > 0)
     union = np.logical_or(mask1 > 0, mask2 > 0)
-    iou = np.sum(intersection) / max(np.sum(union), 1e-6)
+    sum_union = np.sum(union)
+    if sum_union == 0:  # 两个 mask 都是全 0，认为完全相同
+        return 1.0
+    iou = np.sum(intersection) / sum_union
     # diff_mask = np.logical_xor(mask1 > 0, mask2 > 0).astype(np.uint8)
     return iou
 
@@ -363,6 +384,8 @@ def gen_frame(folder_paths, filename, output_dir="output_jpg", sort="asc"):
             except Exception as e:
                 print(f"转换失败 {filename}: {str(e)}")
 
+    return os.path.dirname(output_path)
+
 
 def clean_mask(mask, kernel_size=3, iterations=1):
     """
@@ -448,32 +471,17 @@ def postprocess_mask(mask):
     return mask / np.max(mask)
 
 
-from sam2.build_sam import build_sam2_video_predictor
-from tools.get_mask_bboxes import get_mask_bboxes
-
-if __name__ == "__main__":
-    # 加载SAM2 video predictor
-    sam2_checkpoint = "D:\QY\Checkpoints\sam2.1_hiera_large.pt"
-    model_cfg = "D:\QY\sam2-cd-no-training\sam2\configs\sam2.1\sam2.1_hiera_l.yaml"
-
-    predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device)
-
-    # 输入前后时相图片
-    img_name = "tile_0_0.png"
-    T1 = "D:\QY\Datasets\WHU-CD\\train\A"
-    T2 = "D:\QY\Datasets\WHU-CD\\train\B"
-    T1_label = "D:\QY\Datasets\WHU-CD\\before_label"
-    T2_label = "D:\QY\Datasets\WHU-CD\\after_label"
-
+def step_one(img_name, T1_dir, T2_dir, T1_label_dir, T2_label_dir, predictor=None):
+    # 
     diff_mask_list = []
 
-    for i, label in enumerate([T1_label, T2_label]):
+    for i, label_dir in enumerate([T1_label_dir, T2_label_dir]):
         # 生成顺序jpg
-        gen_frame([T1, T2], img_name, sort="asc" if i==0 else "desc")
+        video_dir = gen_frame([T1_dir, T2_dir], img_name, sort="asc" if i==0 else "desc")
 
         # 读取帧图片
         # `video_dir` a directory of JPEG frames with filenames like `<frame_index>.jpg`
-        video_dir = os.path.join("D:\QY\Datasets\sam2_test\WHU", "output_jpg")
+        # video_dir = os.path.join("D:\QY\Datasets\sam2_test\WHU", "output_jpg")
 
         # scan all the JPEG frame names in this directory
         frame_names = [
@@ -488,28 +496,54 @@ if __name__ == "__main__":
         predictor.reset_state(inference_state)
 
         # 获取label中建筑物box，并逐个赋予id进行追踪
-        bboxes = get_mask_bboxes(os.path.join(label, img_name))
+        # bboxes = get_mask_bboxes(os.path.join(label_dir, img_name))
+        # print(f"bbox数量: {len(bboxes)}")
+
+        # ann_list = []
+        # for idx, (x, y, w, h) in enumerate(bboxes):
+        #     ann_list.append({
+        #         "ann_frame_idx": 0,
+        #         "ann_obj_id": idx+1,
+        #         "box": np.array([x, y, x+w, y+h])
+        #     })
+
+        # 获取label中建筑物mask、box、points，并逐个赋予id进行追踪
+        masks = extract_single_masks(os.path.join(label_dir, img_name))
+        print(f"建筑物mask数量: {len(masks)}")
 
         ann_list = []
-        for idx, (x, y, w, h) in enumerate(bboxes):
+        for idx, item in enumerate(masks):
+            mask, (x, y, w, h), points = item.values()
+            # 使用box
+            # ann_list.append({
+            #     "ann_frame_idx": 0,
+            #     "ann_obj_id": idx+1,
+            #     "box": np.array([x, y, x+w, y+h])
+            # })
+
+            # 使用mask
             ann_list.append({
                 "ann_frame_idx": 0,
                 "ann_obj_id": idx+1,
-                "box": np.array([x, y, x+w, y+h])
+                "mask": mask
             })
 
         # 将ann_list导入predictor
-        for item in ann_list:
-            _, out_obj_ids, out_mask_logits = add_new_obj(**item, predictor=predictor) 
+        try:
+            for item in ann_list:
+                _, out_obj_ids, out_mask_logits = add_new_obj(**item, predictor=predictor, inference_state=inference_state) 
+        except Exception as e:
+            raise e
 
         # 获取追踪结果
         # run propagation throughout the video and collect the results in a dict
         video_segments = {}  # video_segments contains the per-frame segmentation results
-        for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state):
-            video_segments[out_frame_idx] = {
-                out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
-                for i, out_obj_id in enumerate(out_obj_ids)
-            }
+        if len(ann_list) != 0:
+            for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state):
+                video_segments[out_frame_idx] = {
+                    out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
+                    for i, out_obj_id in enumerate(out_obj_ids)
+                }
 
         # render the segmentation results every few frames
         vis_frame_stride = 1
@@ -543,54 +577,123 @@ if __name__ == "__main__":
         # 
         # mask合并显示
         segments_len = len(video_segments)
-        # 首尾帧比较
-        diff_mask = merge_masks(
-            video_segments[0], 
-            compare_masks_dict=video_segments[segments_len-1])
+        if segments_len == 0:
+            diff_mask = {}
+        else:
+            # 首尾帧比较
+            diff_mask = merge_masks(
+                video_segments[0], 
+                compare_masks_dict=video_segments[segments_len-1])
         
         diff_mask_list.append(diff_mask)
 
+        torch.cuda.empty_cache()  # 清理 PyTorch 的 CUDA 缓存
 
-    # diff_1 = diff_mask_list[0]
-    # diff_2 = diff_mask_list[1]
-    # diff_mask = sum_masks(diff_1, diff_2)
-    # diff_mask = diff_mask
 
-    # diff_1 = postprocess_mask(diff_mask_list[0])
-    # diff_2 = postprocess_mask(diff_mask_list[1])
-    # diff_mask = sum_masks(diff_1, diff_2)
-    # diff_mask = postprocess_mask(diff_mask)
+    # 显式释放 predictor
+    del predictor
+    
+    return diff_mask_list
 
-    diff_1 = sum_masks_dict(diff_mask_list[0])
-    diff_2 = sum_masks_dict(diff_mask_list[1])
-    diff_mask = sum_masks_dict(*diff_mask_list)
-    diff_mask = diff_mask
 
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
+from sam2.build_sam import build_sam2_video_predictor
+from tools.get_mask_bboxes import get_mask_bboxes
+from tools.extract_single_masks import extract_single_masks
+from tools.misc import binary_accuracy, AverageMeter
+import statistics
 
-    # 显示第一帧 + 原始masks
-    frame1 = Image.open(os.path.join(video_dir, frame_names[0]))
-    # ax1.imshow(frame1)
-    ax1.set_title(f"Frame {1} (Masks)")
-    show_mask(diff_1, ax1, obj_id=1)
-    # show_mask(merged_mask_list[0], ax1, obj_id=1)
-    # for out_obj_id, out_mask in video_segments[out_frame_idx].items():
-    #     show_mask(out_mask, ax1, obj_id=out_obj_id)
 
-    # 显示第二帧 + 原始masks
-    frame2 = Image.open(os.path.join(video_dir, frame_names[1]))
-    # ax2.imshow(frame2)
-    ax2.set_title(f"Frame {1 + 1} (Masks)")
-    show_mask(diff_2, ax2, obj_id=2)
-    # show_mask(merged_mask_list[1], ax2, obj_id=2)
-    # for out_obj_id, out_mask in video_segments[out_frame_idx + 1].items():
-    #     show_mask(out_mask, ax2, obj_id=out_obj_id)
+if __name__ == "__main__":
+    # 加载SAM2 video predictor
+    sam2_checkpoint = "D:\QY\Checkpoints\sam2.1_hiera_base_plus.pt"
+    model_cfg = "D:\QY\sam2-cd-no-training\sam2\configs\sam2.1\sam2.1_hiera_b+.yaml"
 
-    # 显示差分结果（红色高亮变化区域）
-    # ax3.imshow(frame2)
-    show_mask(diff_mask, ax3, obj_id=3, random_color=True)
-    # ax3.imshow(diff_mask, cmap='Reds', alpha=0.5)  # 红色半透明叠加
-    ax3.set_title("Changes (Red Regions)")
 
-    plt.tight_layout()
-    plt.show()
+    # 输入前后时相图片
+    T1 = "D:\QY\Datasets\WHU-CD\\test\A"
+    T2 = "D:\QY\Datasets\WHU-CD\\test\B"
+    diff_label_dir = "D:\QY\Datasets\WHU-CD\\test\label"
+    T1_label = "D:\QY\Datasets\WHU-CD\\before_label"
+    T2_label = "D:\QY\Datasets\WHU-CD\\after_label"
+
+    # 读取前后时相路径中的所有文件名
+    img_names = [
+        p for p in os.listdir(T1)
+        if os.path.splitext(p)[-1] in [".png"]
+    ]
+
+    # img_names = ["tile_12288_29696.png"]
+    F1_meter = AverageMeter()
+    IoU_meter = AverageMeter()
+    Acc_meter = AverageMeter()
+    Pre_meter = AverageMeter()
+    Rec_meter = AverageMeter()
+
+    with open("_log.txt", "w", encoding="utf-8") as f:
+        for idx, img_name in enumerate(img_names):
+            predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device)
+
+            diff_mask_list = step_one(img_name, T1, T2, T1_label, T2_label, predictor)
+        
+            # diff_1 = diff_mask_list[0]
+            # diff_2 = diff_mask_list[1]
+            # diff_mask = sum_masks(diff_1, diff_2)
+            # diff_mask = diff_mask
+
+            # diff_1 = postprocess_mask(diff_mask_list[0])
+            # diff_2 = postprocess_mask(diff_mask_list[1])
+            # diff_mask = sum_masks(diff_1, diff_2)
+            # diff_mask = postprocess_mask(diff_mask)
+
+            diff_1 = sum_masks_dict(diff_mask_list[0])
+            diff_2 = sum_masks_dict(diff_mask_list[1])
+            diff_mask = sum_masks_dict(*diff_mask_list)
+            # 读取标签图（单通道）
+            label_mask = cv2.imread(os.path.join(diff_label_dir, img_name), cv2.IMREAD_GRAYSCALE)
+            # iou = compute_mask_iou(diff_mask, label_mask)
+            acc, precision, recall, f1, iou = binary_accuracy(diff_mask, label_mask)
+
+            F1_meter.update(f1)
+            Acc_meter.update(acc)
+            IoU_meter.update(iou)
+            Pre_meter.update(precision)
+            Rec_meter.update(recall)
+
+            print(f"{idx+1}/{len(img_names)} iou: {iou} f1: {f1} pre: {precision} rec: {recall}")
+            f.write(f"{idx+1}/{len(img_names)} f1: {format(f1*100,'.2f')} iou: {format(iou*100,'.2f')} pre: {format(precision*100,'.2f')} rec: {format(recall*100,'.2f')} name: {img_name}\n")
+
+            # fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
+
+            # # 显示第一帧 + 原始masks
+            # # frame1 = Image.open(os.path.join(video_dir, frame_names[0]))
+            # # ax1.imshow(frame1)
+            # ax1.set_title(f"Frame {1} (Masks)")
+            # show_mask(diff_1, ax1, obj_id=1)
+            # # show_mask(merged_mask_list[0], ax1, obj_id=1)
+            # # for out_obj_id, out_mask in video_segments[out_frame_idx].items():
+            # #     show_mask(out_mask, ax1, obj_id=out_obj_id)
+
+            # # 显示第二帧 + 原始masks
+            # # frame2 = Image.open(os.path.join(video_dir, frame_names[1]))
+            # # ax2.imshow(frame2)
+            # ax2.set_title(f"Frame {1 + 1} (Masks)")
+            # show_mask(diff_2, ax2, obj_id=2)
+            # # show_mask(merged_mask_list[1], ax2, obj_id=2)
+            # # for out_obj_id, out_mask in video_segments[out_frame_idx + 1].items():
+            # #     show_mask(out_mask, ax2, obj_id=out_obj_id)
+
+            # # 显示差分结果（红色高亮变化区域）
+            # # ax3.imshow(frame2)
+            # show_mask(diff_mask, ax3, obj_id=3, random_color=True)
+            # # ax3.imshow(diff_mask, cmap='Reds', alpha=0.5)  # 红色半透明叠加
+            # ax3.set_title("Changes (Red Regions)")
+
+            # plt.tight_layout()
+            # plt.show()
+
+
+        try:
+            print(f"平均值 iou: {IoU_meter.avg} f1: {F1_meter.avg} pre: {Pre_meter.avg} rec: {Rec_meter.avg}")
+            f.write(f"平均值 iou: {IoU_meter.avg} f1: {F1_meter.avg} pre: {Pre_meter.avg} rec: {Rec_meter.avg}")
+        except statistics.StatisticsError:
+            print("列表为空，无法计算平均值")
