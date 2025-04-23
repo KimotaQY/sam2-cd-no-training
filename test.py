@@ -1,4 +1,5 @@
 import os
+
 # if using Apple MPS, fall back to CPU for unsupported ops
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 import cv2
@@ -31,8 +32,6 @@ elif device.type == "mps":
     )
 
 
-
-
 def show_mask(mask, ax, obj_id=None, random_color=False):
     if random_color:
         color = np.concatenate([np.random.random(3), np.array([0.6])], axis=0)
@@ -46,26 +45,53 @@ def show_mask(mask, ax, obj_id=None, random_color=False):
 
 
 def show_points(coords, labels, ax, marker_size=200):
-    pos_points = coords[labels==1]
-    neg_points = coords[labels==0]
-    ax.scatter(pos_points[:, 0], pos_points[:, 1], color='green', marker='*', s=marker_size, edgecolor='white', linewidth=1.25)
-    ax.scatter(neg_points[:, 0], neg_points[:, 1], color='red', marker='*', s=marker_size, edgecolor='white', linewidth=1.25)
+    pos_points = coords[labels == 1]
+    neg_points = coords[labels == 0]
+    ax.scatter(
+        pos_points[:, 0],
+        pos_points[:, 1],
+        color="green",
+        marker="*",
+        s=marker_size,
+        edgecolor="white",
+        linewidth=1.25,
+    )
+    ax.scatter(
+        neg_points[:, 0],
+        neg_points[:, 1],
+        color="red",
+        marker="*",
+        s=marker_size,
+        edgecolor="white",
+        linewidth=1.25,
+    )
 
 
 def show_box(box, ax):
     x0, y0 = box[0], box[1]
     w, h = box[2] - box[0], box[3] - box[1]
-    ax.add_patch(plt.Rectangle((x0, y0), w, h, edgecolor='green', facecolor=(0, 0, 0, 0), lw=2))
+    ax.add_patch(
+        plt.Rectangle((x0, y0), w, h, edgecolor="green", facecolor=(0, 0, 0, 0), lw=2)
+    )
 
 
-def add_new_obj(ann_frame_idx, ann_obj_id, points=None, labels=None, box=None, mask=None, predictor=None, inference_state=None):
+def add_new_obj(
+    ann_frame_idx,
+    ann_obj_id,
+    points=None,
+    labels=None,
+    box=None,
+    mask=None,
+    predictor=None,
+    inference_state=None,
+):
     try:
         ann_frame_idx = ann_frame_idx  # the frame index we interact with
         ann_obj_id = ann_obj_id  # give a unique id to each object we interact with (it can be any integers)
 
         if points is not None or box is not None:
             # Let's add a positive click at (x, y) to get started
-            points = np.array(points, dtype=np.float32) if labels is not None else None
+            points = np.array(points, dtype=np.float32) if points is not None else None
             # for labels, `1` means positive click and `0` means negative click
             labels = np.array(labels, np.int32) if labels is not None else None
 
@@ -81,10 +107,10 @@ def add_new_obj(ann_frame_idx, ann_obj_id, points=None, labels=None, box=None, m
         if mask is not None:
             # 1. 将 OpenCV 掩码 (0,255) 转换为二进制 (0,1)
             binary_mask = (mask > 128).astype(np.uint8)  # 阈值化
-            
+
             # 2. 转换为 PyTorch 张量，并转为布尔类型
             mask_tensor = torch.from_numpy(binary_mask).to(torch.bool)
-            
+
             # 检查形状是否为 (H, W)
             assert mask_tensor.dim() == 2, f"Mask must be 2D, got {mask_tensor.shape}"
 
@@ -96,80 +122,52 @@ def add_new_obj(ann_frame_idx, ann_obj_id, points=None, labels=None, box=None, m
             )
     except Exception as e:
         raise e  # 主动抛出错误
-    
+
     return _, out_obj_ids, out_mask_logits
-
-
-# ann_list = [
-#     {
-#         "ann_frame_idx": 0,
-#         "ann_obj_id": 1,
-#         "points": [[303,883]],
-#         "labels": [1]
-#     },
-#     {
-#         "ann_frame_idx": 0,
-#         "ann_obj_id": 2,
-#         "points": [[372.4,851.9]],
-#         "labels": [1]
-#     },
-#     {
-#         "ann_frame_idx": 0,
-#         "ann_obj_id": 3,
-#         "points": [[708.1,163.6]],
-#         "labels": [1]
-#     },
-#     {
-#         "ann_frame_idx": 0,
-#         "ann_obj_id": 4,
-#         "points": [[691,120.3]],
-#         "labels": [1]
-#     },
-# ]
 
 
 def _merge_masks(masks_dict):
     """
     合并同一帧的所有 masks（逻辑或操作）
-    输入: 
+    输入:
         masks_dict (dict): {obj_id: mask, ...}
-    返回: 
+    返回:
         merged_mask (np.ndarray): 合并后的二值化mask（0/1）
     """
     merged_mask = np.zeros_like(next(iter(masks_dict.values())), dtype=np.uint8)
     for mask in masks_dict.values():
         merged_mask = np.logical_or(merged_mask, mask > 0).astype(np.uint8)
     return merged_mask
-    
+
 
 def _merge_masks(masks_dict, compare_masks_dict=None, iou_threshold=0.5):
     """
     合并当前帧的masks，但跳过与对比帧中高IoU的物体
-    
+
     参数:
         masks_dict (dict): 当前帧的masks {obj_id: mask}
         compare_masks_dict (dict): 对比帧的masks {obj_id: mask}（可选）
         iou_threshold (float): IoU阈值，大于此值则跳过合并
-    
+
     返回:
         merged_mask (np.ndarray): 合并后的二值mask
     """
     merged_mask = np.zeros_like(next(iter(masks_dict.values())), dtype=np.uint8)
-    
+
     # 如果没有对比帧，直接合并所有masks
     if compare_masks_dict is None:
         for mask in masks_dict.values():
             merged_mask = np.logical_or(merged_mask, mask > 0).astype(np.uint8)
         return merged_mask
-    
+
     # 遍历当前帧的每个物体
     for obj_id, mask in masks_dict.items():
         mask_binary = (mask > 0).astype(np.uint8)
-        
+
         # 检查对比帧中是否存在高IoU的物体
         compare_mask = compare_masks_dict.get(obj_id)
         compare_binary = (compare_mask > 0).astype(np.uint8)
-            
+
         # 计算IoU（忽略全零mask的情况）
         if np.any(compare_binary) or np.any(mask_binary):
             iou = compute_mask_iou(compare_binary.flatten(), mask_binary.flatten())
@@ -179,36 +177,36 @@ def _merge_masks(masks_dict, compare_masks_dict=None, iou_threshold=0.5):
                 # 仅合并低IoU的物体
                 print("合并")
                 merged_mask = np.logical_or(merged_mask, mask_binary).astype(np.uint8)
-    
+
     return merged_mask
 
 
 def merge_masks(masks_dict, compare_masks_dict=None, iou_threshold=0.5):
     """
     合并当前帧的masks，但跳过与对比帧中高IoU的物体
-    
+
     参数:
         masks_dict (dict): 当前帧的masks {obj_id: mask}
         compare_masks_dict (dict): 对比帧的masks {obj_id: mask}（可选）
         iou_threshold (float): IoU阈值，大于此值则跳过合并
-    
+
     返回:
         merged_mask (dict): 保留下来的mask
     """
     merged_mask = {}
-    
+
     # 如果没有对比帧，直接返回masks_dict
     if compare_masks_dict is None:
         return masks_dict
-    
+
     # 遍历当前帧的每个物体
     for obj_id, mask in masks_dict.items():
         mask_binary = (mask > 0).astype(np.uint8)
-        
+
         # 检查对比帧中是否存在高IoU的物体
         compare_mask = compare_masks_dict.get(obj_id)
         compare_binary = (compare_mask > 0).astype(np.uint8)
-            
+
         # 计算IoU（忽略全零mask的情况）
         if np.any(compare_binary) or np.any(mask_binary):
             iou = compute_mask_iou(compare_binary.flatten(), mask_binary.flatten())
@@ -218,20 +216,20 @@ def merge_masks(masks_dict, compare_masks_dict=None, iou_threshold=0.5):
                 # 仅合并低IoU的物体
                 # print("合并")
                 merged_mask[obj_id] = mask
-    
+
     return merged_mask
 
 
 def compute_mask_diff(mask1, mask2):
     """
     计算两个mask的差异（变化区域）
-    返回: 
+    返回:
         diff_mask (np.ndarray): 差异区域（1表示变化，0表示未变化）
     """
     # 确保mask是布尔类型或0/1二值
     mask1_bin = (mask1 > 0).astype(np.uint8)
     mask2_bin = (mask2 > 0).astype(np.uint8)
-    
+
     # 求差集：在mask1但不在mask2，或反之
     diff_mask = np.bitwise_xor(mask1_bin, mask2_bin)
     return diff_mask
@@ -294,12 +292,9 @@ def sum_masks_dict(masks_A, masks_B=None, iou_threshold=0.5):
         for mask in masks_A.values():
             merged_mask = np.logical_or(merged_mask, mask > 0).astype(np.uint8)
         return merged_mask
-    
+
     # 逐个对比masks中的mask的iou，过高的移除
-    keys_to_remove = {
-        "A": [],
-        "B": []
-    }
+    keys_to_remove = {"A": [], "B": []}
     for obj_id_A, mask_A in masks_A.items():
         mask_A_binary = (mask_A > 0).astype(np.uint8)
         for obj_id_B, mask_B in masks_B.items():
@@ -322,7 +317,7 @@ def sum_masks_dict(masks_A, masks_B=None, iou_threshold=0.5):
     for obj_id, mask in masks_A.items():
         if obj_id not in keys_to_remove["A"]:
             merged_mask = np.logical_or(merged_mask, mask > 0).astype(np.uint8)
-    
+
     for obj_id, mask in masks_B.items():
         if obj_id not in keys_to_remove["B"]:
             merged_mask = np.logical_or(merged_mask, mask > 0).astype(np.uint8)
@@ -340,21 +335,23 @@ def gen_frame(folder_paths, filename, output_dir="output_jpg", sort="asc"):
             output_path = os.path.join("D:\QY\Datasets\sam2_test\WHU", output_dir)
             # 确保输出文件夹存在
             os.makedirs(output_path, exist_ok=True)
-            output_path = os.path.join(output_path, str(idx+1) + '.jpg')
-            
+            output_path = os.path.join(output_path, str(idx + 1) + ".jpg")
+
             # 打开PNG图片并转换为RGB模式（JPG不支持PNG的RGBA透明度）
             try:
                 with Image.open(input_path) as img:
-                    if img.mode in ('RGBA', 'LA'):
+                    if img.mode in ("RGBA", "LA"):
                         # 创建一个白色背景的RGB图像
-                        background = Image.new('RGB', img.size, (255, 255, 255))
-                        background.paste(img, mask=img.split()[-1])  # 使用alpha通道作为mask
+                        background = Image.new("RGB", img.size, (255, 255, 255))
+                        background.paste(
+                            img, mask=img.split()[-1]
+                        )  # 使用alpha通道作为mask
                         img = background
-                    elif img.mode != 'RGB':
-                        img = img.convert('RGB')
-                    
+                    elif img.mode != "RGB":
+                        img = img.convert("RGB")
+
                     # 保存为JPG
-                    img.save(output_path, 'JPEG', quality=90)
+                    img.save(output_path, "JPEG", quality=90)
                     print(f"转换成功: {filename} -> {os.path.basename(output_path)}")
             except Exception as e:
                 print(f"转换失败 {filename}: {str(e)}")
@@ -365,21 +362,23 @@ def gen_frame(folder_paths, filename, output_dir="output_jpg", sort="asc"):
             output_path = os.path.join("D:\QY\Datasets\sam2_test\WHU", output_dir)
             # 确保输出文件夹存在
             os.makedirs(output_path, exist_ok=True)
-            output_path = os.path.join(output_path, str(idx+1) + '.jpg')
-            
+            output_path = os.path.join(output_path, str(idx + 1) + ".jpg")
+
             # 打开PNG图片并转换为RGB模式（JPG不支持PNG的RGBA透明度）
             try:
                 with Image.open(input_path) as img:
-                    if img.mode in ('RGBA', 'LA'):
+                    if img.mode in ("RGBA", "LA"):
                         # 创建一个白色背景的RGB图像
-                        background = Image.new('RGB', img.size, (255, 255, 255))
-                        background.paste(img, mask=img.split()[-1])  # 使用alpha通道作为mask
+                        background = Image.new("RGB", img.size, (255, 255, 255))
+                        background.paste(
+                            img, mask=img.split()[-1]
+                        )  # 使用alpha通道作为mask
                         img = background
-                    elif img.mode != 'RGB':
-                        img = img.convert('RGB')
-                    
+                    elif img.mode != "RGB":
+                        img = img.convert("RGB")
+
                     # 保存为JPG
-                    img.save(output_path, 'JPEG', quality=90)
+                    img.save(output_path, "JPEG", quality=90)
                     print(f"转换成功: {filename} -> {os.path.basename(output_path)}")
             except Exception as e:
                 print(f"转换失败 {filename}: {str(e)}")
@@ -397,31 +396,31 @@ def clean_mask(mask, kernel_size=3, iterations=1):
     """
     # 保存原始形状
     orig_shape = mask.shape
-     
+
     # 转换为OpenCV兼容格式
     if mask.dtype == bool:
         mask = mask.astype(np.uint8) * 255
     elif mask.dtype == np.float32 or mask.dtype == np.float64:
         mask = (mask * 255).astype(np.uint8)
-    
+
     # 处理可能的3D输入（兼容 (H,W,1) 或 (H,W,3)）
     if len(mask.shape) == 3:
         mask = mask.squeeze()  # 移除单维度 (H,W,1) → (H,W)
         if len(mask.shape) == 3:  # 如果仍是3D（如RGB）
             mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
-    
+
     kernel = np.ones((kernel_size, kernel_size), np.uint8)
-    
+
     # 开运算：先腐蚀后膨胀（去除小噪点）
     cleaned = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=iterations)
-    
+
     # 闭运算：先膨胀后腐蚀（填充小孔洞）
     cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel, iterations=iterations)
 
     # 恢复原始形状
     if len(orig_shape) == 3:
         cleaned = np.expand_dims(cleaned, 0)  # (1024,1024) -> (1,1024,1024)
-    
+
     return cleaned
 
 
@@ -434,13 +433,13 @@ def filter_by_area(mask, min_area=100):
     """
     # 保存原始形状
     orig_shape = mask.shape
-     
+
     # 转换为OpenCV兼容格式
     if mask.dtype == bool:
         mask = mask.astype(np.uint8) * 255
     elif mask.dtype == np.float32 or mask.dtype == np.float64:
         mask = (mask * 255).astype(np.uint8)
-    
+
     # 处理可能的3D输入（兼容 (H,W,1) 或 (H,W,3)）
     if len(mask.shape) == 3:
         mask = mask.squeeze()  # 移除单维度 (H,W,1) → (H,W)
@@ -449,7 +448,7 @@ def filter_by_area(mask, min_area=100):
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     filtered_mask = np.zeros_like(mask)
-    
+
     for cnt in contours:
         if cv2.contourArea(cnt) >= min_area:
             cv2.drawContours(filtered_mask, [cnt], -1, 255, thickness=cv2.FILLED)
@@ -457,7 +456,7 @@ def filter_by_area(mask, min_area=100):
     # 恢复原始形状
     if len(orig_shape) == 3:
         filtered_mask = np.expand_dims(filtered_mask, 0)  # (1024,1024) -> (1,1024,1024)
-    
+
     return filtered_mask
 
 
@@ -472,12 +471,14 @@ def postprocess_mask(mask):
 
 
 def step_one(img_name, T1_dir, T2_dir, T1_label_dir, T2_label_dir, predictor=None):
-    # 
+    #
     diff_mask_list = []
 
     for i, label_dir in enumerate([T1_label_dir, T2_label_dir]):
         # 生成顺序jpg
-        video_dir = gen_frame([T1_dir, T2_dir], img_name, sort="asc" if i==0 else "desc")
+        video_dir = gen_frame(
+            [T1_dir, T2_dir], img_name, sort="asc" if i == 0 else "desc"
+        )
 
         # 读取帧图片
         # `video_dir` a directory of JPEG frames with filenames like `<frame_index>.jpg`
@@ -485,7 +486,8 @@ def step_one(img_name, T1_dir, T2_dir, T1_label_dir, T2_label_dir, predictor=Non
 
         # scan all the JPEG frame names in this directory
         frame_names = [
-            p for p in os.listdir(video_dir)
+            p
+            for p in os.listdir(video_dir)
             if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG"]
         ]
         frame_names.sort(key=lambda p: int(os.path.splitext(p)[0]))
@@ -514,32 +516,50 @@ def step_one(img_name, T1_dir, T2_dir, T1_label_dir, T2_label_dir, predictor=Non
         ann_list = []
         for idx, item in enumerate(masks):
             mask, (x, y, w, h), points = item.values()
+            # 使用points
+            labels = [1]
+            ann_list.append(
+                {
+                    "ann_frame_idx": 0,
+                    "ann_obj_id": idx + 1,
+                    "points": points,
+                    "labels": labels,
+                    # "box": np.array([x, y, x + w, y + h]),
+                }
+            )
+
             # 使用box
-            # ann_list.append({
-            #     "ann_frame_idx": 0,
-            #     "ann_obj_id": idx+1,
-            #     "box": np.array([x, y, x+w, y+h])
-            # })
+            # ann_list.append(
+            #     {
+            #         "ann_frame_idx": 0,
+            #         "ann_obj_id": idx + 1,
+            #         "box": np.array([x, y, x + w, y + h]),
+            #     }
+            # )
 
             # 使用mask
-            ann_list.append({
-                "ann_frame_idx": 0,
-                "ann_obj_id": idx+1,
-                "mask": mask
-            })
+            # ann_list.append({"ann_frame_idx": 0, "ann_obj_id": idx + 1, "mask": mask})
 
         # 将ann_list导入predictor
         try:
             for item in ann_list:
-                _, out_obj_ids, out_mask_logits = add_new_obj(**item, predictor=predictor, inference_state=inference_state) 
+                _, out_obj_ids, out_mask_logits = add_new_obj(
+                    **item, predictor=predictor, inference_state=inference_state
+                )
         except Exception as e:
             raise e
 
         # 获取追踪结果
         # run propagation throughout the video and collect the results in a dict
-        video_segments = {}  # video_segments contains the per-frame segmentation results
+        video_segments = (
+            {}
+        )  # video_segments contains the per-frame segmentation results
         if len(ann_list) != 0:
-            for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state):
+            for (
+                out_frame_idx,
+                out_obj_ids,
+                out_mask_logits,
+            ) in predictor.propagate_in_video(inference_state):
                 video_segments[out_frame_idx] = {
                     out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
                     for i, out_obj_id in enumerate(out_obj_ids)
@@ -562,7 +582,7 @@ def step_one(img_name, T1_dir, T2_dir, T1_label_dir, T2_label_dir, predictor=Non
         #     segments_len = len(video_segments)
         #     # 非尾帧与尾帧比较，尾帧与首帧比较 todo
         #     merged_mask = merge_masks(
-        #         video_segments[out_frame_idx], 
+        #         video_segments[out_frame_idx],
         #         compare_masks_dict=video_segments[segments_len-1] if out_frame_idx < (segments_len-1) else video_segments[0])
         #     merged_mask_list.append(merged_mask)
         #     # show_mask(merged_mask, plt.gca(), obj_id=1)
@@ -574,7 +594,7 @@ def step_one(img_name, T1_dir, T2_dir, T1_label_dir, T2_label_dir, predictor=Non
 
         # diff_mask_list.append(diff_mask)
 
-        # 
+        #
         # mask合并显示
         segments_len = len(video_segments)
         if segments_len == 0:
@@ -582,17 +602,16 @@ def step_one(img_name, T1_dir, T2_dir, T1_label_dir, T2_label_dir, predictor=Non
         else:
             # 首尾帧比较
             diff_mask = merge_masks(
-                video_segments[0], 
-                compare_masks_dict=video_segments[segments_len-1])
-        
+                video_segments[0], compare_masks_dict=video_segments[segments_len - 1]
+            )
+
         diff_mask_list.append(diff_mask)
 
         torch.cuda.empty_cache()  # 清理 PyTorch 的 CUDA 缓存
 
-
     # 显式释放 predictor
     del predictor
-    
+
     return diff_mask_list
 
 
@@ -605,24 +624,22 @@ import statistics
 
 if __name__ == "__main__":
     # 加载SAM2 video predictor
-    sam2_checkpoint = "D:\QY\Checkpoints\sam2.1_hiera_base_plus.pt"
-    model_cfg = "D:\QY\sam2-cd-no-training\sam2\configs\sam2.1\sam2.1_hiera_b+.yaml"
-
+    sam2_checkpoint = "E:\CD_Checkpoints\sam2.1_hiera_base_plus.pt"
+    model_cfg = (
+        "E:\CD_projects\sam2-cd-no-training\sam2\configs\sam2.1\sam2.1_hiera_b+.yaml"
+    )
 
     # 输入前后时相图片
-    T1 = "D:\QY\Datasets\WHU-CD\\test\A"
-    T2 = "D:\QY\Datasets\WHU-CD\\test\B"
-    diff_label_dir = "D:\QY\Datasets\WHU-CD\\test\label"
-    T1_label = "D:\QY\Datasets\WHU-CD\\before_label"
-    T2_label = "D:\QY\Datasets\WHU-CD\\after_label"
+    T1 = "E:\CD_datasets\WHU-CD\\test\A"
+    T2 = "E:\CD_datasets\WHU-CD\\test\B"
+    diff_label_dir = "E:\CD_datasets\WHU-CD\\test\label"
+    T1_label = "E:\CD_datasets\WHU-CD\\before_label"
+    T2_label = "E:\CD_datasets\WHU-CD\\after_label"
 
     # 读取前后时相路径中的所有文件名
-    img_names = [
-        p for p in os.listdir(T1)
-        if os.path.splitext(p)[-1] in [".png"]
-    ]
+    img_names = [p for p in os.listdir(T1) if os.path.splitext(p)[-1] in [".png"]]
 
-    # img_names = ["tile_12288_29696.png"]
+    # img_names = ["tile_2048_3072.png"]
     F1_meter = AverageMeter()
     IoU_meter = AverageMeter()
     Acc_meter = AverageMeter()
@@ -631,10 +648,12 @@ if __name__ == "__main__":
 
     with open("_log.txt", "w", encoding="utf-8") as f:
         for idx, img_name in enumerate(img_names):
-            predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device)
+            predictor = build_sam2_video_predictor(
+                model_cfg, sam2_checkpoint, device=device
+            )
 
             diff_mask_list = step_one(img_name, T1, T2, T1_label, T2_label, predictor)
-        
+
             # diff_1 = diff_mask_list[0]
             # diff_2 = diff_mask_list[1]
             # diff_mask = sum_masks(diff_1, diff_2)
@@ -649,7 +668,9 @@ if __name__ == "__main__":
             diff_2 = sum_masks_dict(diff_mask_list[1])
             diff_mask = sum_masks_dict(*diff_mask_list)
             # 读取标签图（单通道）
-            label_mask = cv2.imread(os.path.join(diff_label_dir, img_name), cv2.IMREAD_GRAYSCALE)
+            label_mask = cv2.imread(
+                os.path.join(diff_label_dir, img_name), cv2.IMREAD_GRAYSCALE
+            )
             # iou = compute_mask_iou(diff_mask, label_mask)
             acc, precision, recall, f1, iou = binary_accuracy(diff_mask, label_mask)
 
@@ -659,8 +680,12 @@ if __name__ == "__main__":
             Pre_meter.update(precision)
             Rec_meter.update(recall)
 
-            print(f"{idx+1}/{len(img_names)} iou: {iou} f1: {f1} pre: {precision} rec: {recall}")
-            f.write(f"{idx+1}/{len(img_names)} f1: {format(f1*100,'.2f')} iou: {format(iou*100,'.2f')} pre: {format(precision*100,'.2f')} rec: {format(recall*100,'.2f')} name: {img_name}\n")
+            print(
+                f"{idx+1}/{len(img_names)} iou: {iou} f1: {f1} pre: {precision} rec: {recall}"
+            )
+            f.write(
+                f"{idx+1}/{len(img_names)} f1: {format(f1*100,'.2f')} iou: {format(iou*100,'.2f')} pre: {format(precision*100,'.2f')} rec: {format(recall*100,'.2f')} name: {img_name}\n"
+            )
 
             # fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
 
@@ -691,9 +716,12 @@ if __name__ == "__main__":
             # plt.tight_layout()
             # plt.show()
 
-
         try:
-            print(f"平均值 iou: {IoU_meter.avg} f1: {F1_meter.avg} pre: {Pre_meter.avg} rec: {Rec_meter.avg}")
-            f.write(f"平均值 iou: {IoU_meter.avg} f1: {F1_meter.avg} pre: {Pre_meter.avg} rec: {Rec_meter.avg}")
+            print(
+                f"平均值 iou: {IoU_meter.avg} f1: {F1_meter.avg} pre: {Pre_meter.avg} rec: {Rec_meter.avg}"
+            )
+            f.write(
+                f"平均值 iou: {IoU_meter.avg} f1: {F1_meter.avg} pre: {Pre_meter.avg} rec: {Rec_meter.avg}"
+            )
         except statistics.StatisticsError:
             print("列表为空，无法计算平均值")
