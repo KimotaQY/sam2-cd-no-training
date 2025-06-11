@@ -13,7 +13,7 @@ import numpy as np
 # TEXT_PROMPT = "house.building.roof"
 TEXT_PROMPT = "house"
 GROUNDING_MODEL = "GroundingDino-1.5-Pro"
-WITH_SLICE_INFERENCE = False
+WITH_SLICE_INFERENCE = True
 SLICE_WH = (480, 480)
 OVERLAP_RATIO = (0.2, 0.2)
 IOU_THRESHOLD = 0.8
@@ -140,21 +140,24 @@ def get_one_by_SAHI(img_path):
 
 
 if __name__ == "__main__":
-    img_dir = r"E:/CD_datasets/LEVIR-CD/test/A"
-    output_dir = r"E:/CD_datasets/LEVIR-CD/test/before_label"
+    img_dir = r"E:/CD_datasets/LEVIR-CD/test/B"
+    # output_dir = r"E:/CD_datasets/LEVIR-CD/test/before_label"
 
-    os.makedirs(output_dir, exist_ok=True)
+    # os.makedirs(output_dir, exist_ok=True)
 
-    # get all filenames
-    img_names = [p for p in os.listdir(img_dir) if os.path.splitext(p)[-1] in [".png"]]
+    # # get all filenames
+    # img_names = [p for p in os.listdir(img_dir) if os.path.splitext(p)[-1] in [".png"]]
 
-    for idx, img_name in enumerate(img_names):
-        img_path = os.path.join(img_dir, img_name)
-        output_path = os.path.join(output_dir, os.path.splitext(img_name)[0] + ".json")
+    # for idx, img_name in enumerate(img_names):
+    #     img_path = os.path.join(img_dir, img_name)
+    #     output_path = os.path.join(output_dir, os.path.splitext(img_name)[0] + ".json")
 
-        if WITH_SLICE_INFERENCE:
-            get_one_by_SAHI(img_path)
-        else:
-            get_one_result(img_path=img_path, output_path=output_path)
+    #     if WITH_SLICE_INFERENCE:
+    #         get_one_by_SAHI(img_path)
+    #     else:
+    #         get_one_result(img_path=img_path, output_path=output_path)
 
-        print(f"{(idx+1)}/{len(img_names)} ===> {img_name} 已完成")
+    #     print(f"{(idx+1)}/{len(img_names)} ===> {img_name} 已完成")
+
+    img_path = os.path.join(img_dir, "test_74.png")
+    get_one_by_SAHI(img_path)

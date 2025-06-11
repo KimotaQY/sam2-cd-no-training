@@ -68,19 +68,22 @@ def draw_bboxes_on_image(image_path, json_path, output_path=None):
 
 # 使用示例
 if __name__ == "__main__":
-    img_dir = r"E:/CD_datasets/LEVIR-CD/test/A"
+    img_dir = r"E:/CD_datasets/LEVIR-CD/test/B"
     json_dir = r"E:/CD_datasets/LEVIR-CD/test/before_label"
     output_dir = r"E:/CD_datasets/LEVIR-CD/test/A_with_box"
 
-    os.makedirs(output_dir, exist_ok=True)
+    # os.makedirs(output_dir, exist_ok=True)
 
-    # get all filenames
-    img_names = [p for p in os.listdir(img_dir) if os.path.splitext(p)[-1] in [".png"]]
+    # # get all filenames
+    # img_names = [p for p in os.listdir(img_dir) if os.path.splitext(p)[-1] in [".png"]]
 
-    for idx, img_name in enumerate(img_names):
-        img_path = os.path.join(img_dir, img_name)
-        json_path = os.path.join(json_dir, os.path.splitext(img_name)[0] + ".json")
-        output_path = os.path.join(output_dir, os.path.splitext(img_name)[0] + ".jpg")
+    # for idx, img_name in enumerate(img_names):
+    #     img_path = os.path.join(img_dir, img_name)
+    #     json_path = os.path.join(json_dir, os.path.splitext(img_name)[0] + ".json")
+    #     output_path = os.path.join(output_dir, os.path.splitext(img_name)[0] + ".jpg")
 
-        print(f"{img_name}")
-        draw_bboxes_on_image(img_path, json_path, output_path)
+    #     print(f"{img_name}")
+    #     draw_bboxes_on_image(img_path, json_path, output_path)
+
+    img_path = os.path.join(img_dir, "test_13.png")
+    draw_bboxes_on_image(img_path, "test_13.json")

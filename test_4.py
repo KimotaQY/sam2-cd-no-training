@@ -1,4 +1,6 @@
+import json
 import os
+from pathlib import Path
 import shutil
 
 # if using Apple MPS, fall back to CPU for unsupported ops
@@ -162,6 +164,12 @@ def merge_masks(masks_dict, compare_masks_dict=None, iou_threshold=0.5):
                 # 仅合并低IoU的物体
                 # print("合并")
                 merged_mask[obj_id] = mask
+                # 显示每个obj的iou
+                # fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
+                # show_mask(mask, ax1, obj_id=obj_id)
+                # ax1.set_title(f"IoU {iou} (Masks)")
+                # plt.tight_layout()
+                # plt.show()
 
     return merged_mask
 
@@ -207,6 +215,21 @@ def sum_masks(mask1, mask2):
     返回:
         sum_mask: 相同shape的矩阵，值为 mask1 + mask2
     """
+    # 处理空输入
+    if not isinstance(mask1, np.ndarray) and (
+        mask2 is None or not isinstance(mask2, np.ndarray)
+    ):
+        # 获取参考shape（若无法获取，抛出异常或指定默认shape）
+        try:
+            ref_shape = next(iter(mask1.values())).shape
+        except StopIteration:
+            ref_shape = (1, 1024, 1024)  # 默认shape
+        return np.zeros(ref_shape, dtype=np.uint8)
+
+    if not isinstance(mask1, np.ndarray):
+        mask1 = np.zeros((1, 1024, 1024), dtype=np.uint8)
+    if not isinstance(mask2, np.ndarray):
+        mask2 = np.zeros((1, 1024, 1024), dtype=np.uint8)
     sum_mask = mask1.astype(np.float32) + mask2.astype(np.float32)
     # return sum_mask / np.max(sum_mask)
     return np.where(sum_mask >= 2, 0, sum_mask)
@@ -450,13 +473,24 @@ def linear_color_interpolation(img1, img2, alpha):
     return interpolated_rgb
 
 
-def step_one(img_name, T1_dir, T2_dir, T1_label_dir, T2_label_dir, predictor=None):
+def step_one(
+    img_name,
+    T1_dir,
+    T2_dir,
+    T1_label_dir,
+    T2_label_dir,
+    predictor=None,
+    label_type="whu",
+    mid_frame=0,
+    diff_frame_num=1,
+    iou_threshold=0.5,
+    prompt_type="box",
+):
     #
     diff_mask_list = []
 
     for i, label_dir in enumerate([T1_label_dir, T2_label_dir]):
         # 生成顺序jpg
-        mid_frame = 1
         video_dir = gen_frame(
             [T1_dir, T2_dir],
             img_name,
@@ -477,8 +511,14 @@ def step_one(img_name, T1_dir, T2_dir, T1_label_dir, T2_label_dir, predictor=Non
         # track objects
         predictor.reset_state(inference_state)
 
-        # 获取label中建筑物mask、box、points，并逐个赋予id进行追踪
-        masks = extract_single_masks(os.path.join(label_dir, img_name))
+        if label_type != "whu":
+            label_path = os.path.join(label_dir, Path(img_name).stem + ".json")
+            with open(label_path, "r") as f:
+                json_result = json.load(f)
+                masks = json_result["objects"]
+        else:
+            # 获取label中建筑物mask、box、points，并逐个赋予id进行追踪
+            masks = extract_single_masks(os.path.join(label_dir, img_name))
         print(f"建筑物mask数量: {len(masks)}")
 
         # 获取追踪结果
@@ -487,43 +527,81 @@ def step_one(img_name, T1_dir, T2_dir, T1_label_dir, T2_label_dir, predictor=Non
             {}
         )  # video_segments contains the per-frame segmentation results
         for idx, item in enumerate(masks):
-            mask, (x, y, w, h), points = item.values()
+            if label_type == "whu":
+                mask, (x, y, w, h), points = item.values()
+            else:
+                box = item.get("bbox")
+                score = item.get("score")
+                # if score < 0.7:
+                #     continue
 
             ann_list = []
             for frame_idx in range(mid_frame + 1):
-                # # 使用points
-                # labels = [1]
-                # ann_list.append(
-                #     {
-                #         "ann_frame_idx": frame_idx,
-                #         "ann_obj_id": idx + 1,
-                #         "points": points,
-                #         "labels": labels,
-                #         # "box": np.array([x, y, x + w, y + h]),
-                #     }
-                # )
-
-                # 使用box
-                # ann_list.append(
-                #     {
-                #         "ann_frame_idx": frame_idx,
-                #         "ann_obj_id": idx + 1,
-                #         "box": np.array([x, y, x + w, y + h]),
-                #     }
-                # )
-
-                # 使用mask
-                ann_list.append(
-                    {"ann_frame_idx": frame_idx, "ann_obj_id": idx + 1, "mask": mask}
-                )
+                if prompt_type == "points":
+                    # 使用points
+                    labels = [1]
+                    ann_list.append(
+                        {
+                            "ann_frame_idx": frame_idx,
+                            "ann_obj_id": idx + 1,
+                            "points": points,
+                            "labels": labels,
+                            # "box": np.array([x, y, x + w, y + h]),
+                        }
+                    )
+                elif prompt_type == "box":
+                    # 使用box
+                    ann_list.append(
+                        {
+                            "ann_frame_idx": frame_idx,
+                            "ann_obj_id": idx + 1,
+                            "box": (
+                                np.array([x, y, x + w, y + h])
+                                if label_type == "whu"
+                                else np.array(box)
+                            ),
+                        }
+                    )
+                else:
+                    # 使用mask
+                    ann_list.append(
+                        {
+                            "ann_frame_idx": frame_idx,
+                            "ann_obj_id": idx + 1,
+                            "mask": mask,
+                        }
+                    )
 
             # 每个建筑单独预测
             # 将ann_list导入predictor
             try:
-                for item in ann_list:
+                next_item = {}
+                for index, item in enumerate(ann_list):
                     _, out_obj_ids, out_mask_logits = add_new_obj(
                         **item, predictor=predictor, inference_state=inference_state
                     )
+                    # if index == 0:
+                    #     _, out_obj_ids, out_mask_logits = add_new_obj(
+                    #         **item, predictor=predictor, inference_state=inference_state
+                    #     )
+                    # else:
+                    #     _, out_obj_ids, out_mask_logits = add_new_obj(
+                    #         **next_item,
+                    #         predictor=predictor,
+                    #         inference_state=inference_state,
+                    #     )
+                    # if index != len(ann_list) - 1:
+                    #     # 当前帧预测结果作为下一帧的输入
+                    #     ann_frame_idx = ann_list[index + 1]["ann_frame_idx"]
+                    #     ann_obj_id = ann_list[index + 1]["ann_obj_id"]
+                    #     _mask = (out_mask_logits[0] > 0.0).cpu().numpy()
+                    #     _mask = np.squeeze(_mask)
+                    #     _mask = _mask.astype("uint8") * 255
+                    #     next_item = {
+                    #         "ann_frame_idx": ann_frame_idx,
+                    #         "ann_obj_id": ann_obj_id,
+                    #         "mask": _mask,
+                    #     }
 
             except Exception as e:
                 raise e
@@ -550,8 +628,50 @@ def step_one(img_name, T1_dir, T2_dir, T1_label_dir, T2_label_dir, predictor=Non
         else:
             # 首尾帧比较
             diff_mask = merge_masks(
-                video_segments[segments_len - 2],
+                video_segments[0 if diff_frame_num == 1 else segments_len - 2],
                 compare_masks_dict=video_segments[segments_len - 1],
+                iou_threshold=iou_threshold,
+            )
+            # 直接求差
+            f_frame = sum_masks_dict(video_segments[0])
+            l_frame = sum_masks_dict(video_segments[segments_len - 1])
+            # diff_mask = compute_mask_diff(f_frame, l_frame)
+            h, w = l_frame.shape[-2:]
+            f_frame = f_frame.reshape(h, w, 1)
+            l_frame = l_frame.reshape(h, w, 1)
+            _diff_mask = sum_masks_dict(diff_mask).reshape(h, w, 1)
+            cv2.imwrite(
+                os.path.join(
+                    f"./logs/test",
+                    (
+                        "asc_first_mask.png"
+                        if len(diff_mask_list) == 0
+                        else "desc_first_mask.png"
+                    ),
+                ),
+                f_frame * 255,
+            )
+            cv2.imwrite(
+                os.path.join(
+                    f"./logs/test",
+                    (
+                        "asc_last_mask.png"
+                        if len(diff_mask_list) == 0
+                        else "desc_last_mask.png"
+                    ),
+                ),
+                l_frame * 255,
+            )
+            cv2.imwrite(
+                os.path.join(
+                    f"./logs/test",
+                    (
+                        "asc_diff_mask.png"
+                        if len(diff_mask_list) == 0
+                        else "desc_diff_mask.png"
+                    ),
+                ),
+                _diff_mask * 255,
             )
 
         diff_mask_list.append(diff_mask)
@@ -571,41 +691,98 @@ from tools.misc import binary_accuracy, AverageMeter
 import statistics
 
 
-if __name__ == "__main__":
+def main(
+    model_type,
+    mid_frame,
+    diff_frame_num,
+    iou_threshold,
+    prompt_type="box",
+    label_type="whu",
+):
+    model_obj = {
+        "t": {
+            "checkpoint": "sam2.1_hiera_tiny.pt",
+            "config": "sam2.1_hiera_t.yaml",
+        },
+        "s": {
+            "checkpoint": "sam2.1_hiera_small.pt",
+            "config": "sam2.1_hiera_s.yaml",
+        },
+        "b+": {
+            "checkpoint": "sam2.1_hiera_base_plus.pt",
+            "config": "sam2.1_hiera_b+.yaml",
+        },
+        "l": {
+            "checkpoint": "sam2.1_hiera_large.pt",
+            "config": "sam2.1_hiera_l.yaml",
+        },
+    }
+
+    checkpoint = model_obj[model_type]["checkpoint"]
+    config = model_obj[model_type]["config"]
     # 加载SAM2 video predictor
-    sam2_checkpoint = "E:\CD_Checkpoints\sam2.1_hiera_base_plus.pt"
-    model_cfg = (
-        "E:\CD_projects\sam2-cd-no-training\sam2\configs\sam2.1\sam2.1_hiera_b+.yaml"
+    sam2_checkpoint = os.path.join("E:\CD_Checkpoints", checkpoint)
+    model_cfg = os.path.join(
+        "E:\CD_projects\sam2-cd-no-training\sam2\configs\sam2.1", config
     )
 
     # 输入前后时相图片
-    T1 = "E:\CD_datasets\WHU-CD\\test\A"
-    T2 = "E:\CD_datasets\WHU-CD\\test\B"
-    diff_label_dir = "E:\CD_datasets\WHU-CD\\test\label"
-    T1_label = "E:\CD_datasets\WHU-CD\\before_label"
-    T2_label = "E:\CD_datasets\WHU-CD\\after_label"
+    if label_type == "whu":
+        T1 = "E:\CD_datasets\WHU-CD\\test\A"
+        T2 = "E:\CD_datasets\WHU-CD\\test\B"
+        diff_label_dir = "E:\CD_datasets\WHU-CD\\test\label"
+        T1_label = "E:\CD_datasets\WHU-CD\\before_label"
+        T2_label = "E:\CD_datasets\WHU-CD\\after_label"
+    else:
+        T1 = "E:\CD_datasets\LEVIR-CD\\test\A"
+        T2 = "E:\CD_datasets\LEVIR-CD\\test\B"
+        diff_label_dir = "E:\CD_datasets\LEVIR-CD\\test\label"
+        T1_label = "E:\CD_datasets\LEVIR-CD\\test\A_sampoly_merge\\result_fixed"
+        T2_label = "E:\CD_datasets\LEVIR-CD\\test\B_sampoly_merge\\result_fixed"
+
+    output_dir = f"./logs/test"
+    # output_dir = f"./logs/{label_type}_sam{model_type}_{prompt_type}_mid{mid_frame}_{diff_frame_num}_iou{iou_threshold}"
 
     # 读取前后时相路径中的所有文件名
     img_names = [p for p in os.listdir(T1) if os.path.splitext(p)[-1] in [".png"]]
 
-    # img_names = ["tile_2048_3072.png"]
+    img_names = ["tile_1024_17408.png"]
     F1_meter = AverageMeter()
     IoU_meter = AverageMeter()
     Acc_meter = AverageMeter()
     Pre_meter = AverageMeter()
     Rec_meter = AverageMeter()
 
-    with open("_log.txt", "w", encoding="utf-8") as f:
+    # 存在的文件夹则跳过
+    if os.path.isdir(output_dir):
+        print(f"{output_dir} 已存在")
+        return
+
+    os.makedirs(output_dir, exist_ok=True)
+    with open(os.path.join(output_dir, "log.txt"), "w", encoding="utf-8") as f:
         for idx, img_name in enumerate(img_names):
             predictor = build_sam2_video_predictor(
                 model_cfg, sam2_checkpoint, device=device
             )
 
-            diff_mask_list = step_one(img_name, T1, T2, T1_label, T2_label, predictor)
+            diff_mask_list = step_one(
+                img_name,
+                T1,
+                T2,
+                T1_label,
+                T2_label,
+                predictor,
+                label_type=label_type,
+                mid_frame=mid_frame,
+                diff_frame_num=diff_frame_num,
+                iou_threshold=iou_threshold,
+                prompt_type=prompt_type,
+            )
 
-            diff_1 = sum_masks_dict(diff_mask_list[0])
-            diff_2 = sum_masks_dict(diff_mask_list[1])
-            diff_mask = sum_masks_dict(*diff_mask_list)
+            # diff_1 = sum_masks_dict(diff_mask_list[0])
+            # diff_2 = sum_masks_dict(diff_mask_list[1])
+            diff_mask = sum_masks_dict(*diff_mask_list, iou_threshold=iou_threshold)
+            # diff_mask = sum_masks(*diff_mask_list)
             # 读取标签图（单通道）
             label_mask = cv2.imread(
                 os.path.join(diff_label_dir, img_name), cv2.IMREAD_GRAYSCALE
@@ -620,10 +797,10 @@ if __name__ == "__main__":
             Rec_meter.update(recall)
 
             print(
-                f"{idx+1}/{len(img_names)} iou: {iou} f1: {f1} pre: {precision} rec: {recall}"
+                f"{idx+1}/{len(img_names)} iou: {iou} f1: {f1} pre: {precision} rec: {recall} acc:{format(acc*100,'.2f')}"
             )
             f.write(
-                f"{idx+1}/{len(img_names)} f1: {format(f1*100,'.2f')} iou: {format(iou*100,'.2f')} pre: {format(precision*100,'.2f')} rec: {format(recall*100,'.2f')} name: {img_name}\n"
+                f"{idx+1}/{len(img_names)} f1: {format(f1*100,'.2f')} iou: {format(iou*100,'.2f')} pre: {format(precision*100,'.2f')} rec: {format(recall*100,'.2f')} acc:{format(acc*100,'.2f')} name: {img_name}\n"
             )
 
             # fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
@@ -655,12 +832,21 @@ if __name__ == "__main__":
             # plt.tight_layout()
             # plt.show()
 
+            h, w = diff_mask.shape[-2:]
+            mask_image = diff_mask.reshape(h, w, 1)
+            cv2.imwrite(os.path.join(output_dir, img_name), mask_image * 255)
+
         try:
             print(
-                f"平均值 iou: {IoU_meter.avg} f1: {F1_meter.avg} pre: {Pre_meter.avg} rec: {Rec_meter.avg}"
+                f"平均值 iou: {IoU_meter.avg} f1: {F1_meter.avg} pre: {Pre_meter.avg} rec: {Rec_meter.avg} acc:{Acc_meter.avg}"
             )
             f.write(
-                f"平均值 iou: {IoU_meter.avg} f1: {F1_meter.avg} pre: {Pre_meter.avg} rec: {Rec_meter.avg}"
+                f"平均值 iou: {IoU_meter.avg} f1: {F1_meter.avg} pre: {Pre_meter.avg} rec: {Rec_meter.avg} acc:{Acc_meter.avg}"
             )
         except statistics.StatisticsError:
             print("列表为空，无法计算平均值")
+
+
+if __name__ == "__main__":
+
+    main("b+", 1, 1, 0.5, "box", label_type="whu")
