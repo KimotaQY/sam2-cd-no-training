@@ -16,8 +16,8 @@ if __name__ == "__main__":
     other_env_name = "sam2-cd-no-training"
     # 要执行的Python文件所在目录和模块名
     script_dir = r"E:\CD_projects\sam2-cd-no-training"
-    script_path = r"E:\CD_projects\sam2-cd-no-training\\test_4.py"
-    module_name = "test_4"  # 文件名（不带.py）
+    script_path = r"E:\CD_projects\sam2-cd-no-training\\script_eval.py"
+    module_name = "script_eval"  # 文件名（不带.py）
 
     iou_list = [0.3, 0.4, 0.5, 0.6, 0.7]
     mid_list = [0, 1, 2, 3]
@@ -26,13 +26,19 @@ if __name__ == "__main__":
     prompt_type_list = ["points", "box", "mask"]
 
     for model_type in model_obj:
-        for diff_frame_num in [1]:
-            for mid_frame in [1]:
-                for iou in [0.5]:
+        for diff_frame_num in diff_frame_num_list:
+            for mid_frame in mid_list:
+                for iou in iou_list:
                     for prompt_type in prompt_type_list:
                         # 要调用的函数名和参数
                         function_name = "main"
-                        args = [model_type, mid_frame, diff_frame_num, iou, prompt_type]
+                        args = [
+                            model_type,
+                            mid_frame,
+                            diff_frame_num,
+                            iou,
+                            prompt_type,
+                        ]
 
                         # 使用 conda run 执行目标环境的 Python
                         cmd = [
