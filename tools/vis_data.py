@@ -576,6 +576,311 @@ def get_f1_vs_iou_threshold_data(mid_frame):
     return data_pivot
 
 
+def plot_memory_by_obj_num(save_path=None, figsize=(6, 4), dpi=300):
+    """
+    绘制符合SCI期刊标准的折线图，展示不同 prompt_type、mid_frame 的 max_memory_usage 随 obj_num 变化
+
+    参数:
+        save_path: 图片保存路径(可选)
+        figsize: 图像尺寸(英寸)
+        dpi: 分辨率
+    """
+    # Step 1: Read the data from log.csv
+    df = pd.read_csv("log.csv")
+    print(df.head())
+
+    # 获取所有数据行的索引
+    all_indices = df.index.tolist()
+
+    # 选择单数行（第1、3、5...行）→ 对应索引为偶数（因为从0开始）
+    odd_rows = df.iloc[::2]  # 步长为2，从第0行开始
+
+    # 选择双数行（第2、4、6...行）→ 对应索引为奇数
+    even_rows = df.iloc[1::2]  # 步长为2，从第1行开始
+
+    df = even_rows
+
+    # 示例输出前几行
+    # print("单数行数据:")
+    # print(odd_rows.head())
+
+    # print("\n双数行数据:")
+    # print(even_rows.head())
+
+    print(df[df["prompt_type"] == "box"].head())
+
+    # Step 2: Ensure numeric types for relevant columns
+    df["obj_num"] = pd.to_numeric(df["obj_num"], errors="coerce")
+    df["max_memory_usage"] = pd.to_numeric(df["max_memory_usage"], errors="coerce")
+
+    # Drop any rows with missing values in key columns
+    df.dropna(
+        subset=["obj_num", "max_memory_usage", "prompt_type", "mid_frame"], inplace=True
+    )
+
+    # Step 3: 设置SCI期刊推荐的样式
+    plt.style.use("default")  # 重置为默认样式
+    plt.rcParams.update(
+        {
+            "font.family": "Arial",
+            "font.size": 9,
+            "axes.labelsize": 10,
+            "axes.titlesize": 11,
+            "xtick.labelsize": 9,
+            "ytick.labelsize": 9,
+            "legend.fontsize": 9,
+            "figure.dpi": dpi,
+            "savefig.dpi": dpi,
+            "savefig.bbox": "tight",
+            "axes.linewidth": 0.8,
+            "lines.linewidth": 1.5,
+            "lines.markersize": 6,
+            "xtick.major.width": 0.8,
+            "ytick.major.width": 0.8,
+            "grid.linewidth": 0.6,
+            "grid.alpha": 0.4,
+        }
+    )
+
+    # Step 4: 创建图形
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+
+    # Step 5: 定义颜色和标记样式 - 每个 mid_frame 一种颜色
+    mid_frames = sorted(df["mid_frame"].unique())
+    colors = ["#4e79a7", "#f28e2b", "#e15759", "#76b7b2"]  # 蓝,橙,红,绿
+    markers = ["o", "s", "D", "^"]  # 圆形,方形,菱形,三角形
+    # 不同线型
+    linestyles = ["-", "--", ":", "-."]
+
+    # Step 6: 按照 mid_frame 分组绘制每条折线
+    for i, mid_frame in enumerate(mid_frames):
+        mid_frame_data = df[df["mid_frame"] == mid_frame]
+
+        # 按 prompt_type 分组绘制每条折线
+        # prompt_types = sorted(mid_frame_data["prompt_type"].unique())
+        prompt_types = ["box", "mask"]
+        for j, prompt in enumerate(prompt_types):
+            prompt_data = mid_frame_data[mid_frame_data["prompt_type"] == prompt]
+            if not prompt_data.empty:
+                # 按 obj_num 排序
+                prompt_data = prompt_data.sort_values("obj_num")
+                ax.plot(
+                    prompt_data["obj_num"],
+                    prompt_data["max_memory_usage"],
+                    label=f"{prompt}_{mid_frame}",
+                    color=colors[i % len(colors)],
+                    marker=markers[j % len(markers)],
+                    linestyle=linestyles[i % len(linestyles)],
+                    linewidth=1.5,
+                    markersize=6,
+                    markeredgecolor="black",
+                    markeredgewidth=0.5,
+                    zorder=3,
+                )
+            else:
+                print(
+                    f"⚠️ No data found for mid_frame '{mid_frame}' and prompt_type '{prompt}'"
+                )
+
+    # Step 7: 设置坐标轴标签
+    ax.set_xlabel("Object Number", labelpad=5)
+    ax.set_ylabel("Max Memory Usage (MB)", labelpad=5)
+
+    # Step 8: 设置图例
+    # 图例放在左上
+
+    ax.legend(
+        title="Prompt Type",
+        frameon=True,
+        edgecolor="black",
+        facecolor="white",
+        loc="upper left",
+        bbox_to_anchor=(0, 1),
+        fontsize=8,
+        ncol=1,
+    )
+
+    # Step 9: 设置网格线
+    ax.grid(True, linestyle="--", alpha=0.4, zorder=0)
+
+    # Step 10: 设置x轴为整数刻度（如果obj_num是整数）
+    obj_nums = sorted(df["obj_num"].unique())
+    if all(isinstance(x, (int, float)) and x.is_integer() for x in obj_nums):
+        ax.set_xticks(obj_nums)
+
+    # Step 11: 调整边框线宽
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.8)
+
+    # Step 12: 紧凑布局
+    plt.tight_layout()
+
+    # Step 13: 保存图像
+    if save_path:
+        if save_path.endswith(".tif"):
+            plt.savefig(
+                save_path,
+                format="tiff",
+                dpi=dpi,
+                pil_kwargs={"compression": "tiff_lzw"},
+            )
+        else:
+            plt.savefig(save_path, dpi=dpi, bbox_inches="tight")
+
+    plt.show()
+
+
+def plot_timecost_by_obj_num(save_path=None, figsize=(6, 4), dpi=300):
+    """
+    绘制符合SCI期刊标准的折线图，展示不同 prompt_type、mid_frame 的 time_cost 随 obj_num 变化
+
+    参数:
+        save_path: 图片保存路径(可选)
+        figsize: 图像尺寸(英寸)
+        dpi: 分辨率
+    """
+    # Step 1: Read the data from log.csv
+    df = pd.read_csv("log.csv")
+    print(df.head())
+
+    # 获取所有数据行的索引
+    all_indices = df.index.tolist()
+
+    # 选择单数行（第1、3、5...行）→ 对应索引为偶数（因为从0开始）
+    odd_rows = df.iloc[::2]  # 步长为2，从第0行开始
+
+    # 选择双数行（第2、4、6...行）→ 对应索引为奇数
+    even_rows = df.iloc[1::2]  # 步长为2，从第1行开始
+
+    df = even_rows
+
+    # 示例输出前几行
+    # print("单数行数据:")
+    # print(odd_rows.head())
+
+    # print("\n双数行数据:")
+    # print(even_rows.head())
+
+    print(df[df["prompt_type"] == "box"].head())
+
+    # Step 2: Ensure numeric types for relevant columns
+    df["obj_num"] = pd.to_numeric(df["obj_num"], errors="coerce")
+    df["time_cost"] = pd.to_numeric(df["time_cost"], errors="coerce")
+
+    # Drop any rows with missing values in key columns
+    df.dropna(subset=["obj_num", "time_cost", "prompt_type", "mid_frame"], inplace=True)
+
+    # Step 3: 设置SCI期刊推荐的样式
+    plt.style.use("default")  # 重置为默认样式
+    plt.rcParams.update(
+        {
+            "font.family": "Arial",
+            "font.size": 9,
+            "axes.labelsize": 10,
+            "axes.titlesize": 11,
+            "xtick.labelsize": 9,
+            "ytick.labelsize": 9,
+            "legend.fontsize": 9,
+            "figure.dpi": dpi,
+            "savefig.dpi": dpi,
+            "savefig.bbox": "tight",
+            "axes.linewidth": 0.8,
+            "lines.linewidth": 1.5,
+            "lines.markersize": 6,
+            "xtick.major.width": 0.8,
+            "ytick.major.width": 0.8,
+            "grid.linewidth": 0.6,
+            "grid.alpha": 0.4,
+        }
+    )
+
+    # Step 4: 创建图形
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+
+    # Step 5: 定义颜色和标记样式 - 每个 mid_frame 一种颜色
+    mid_frames = sorted(df["mid_frame"].unique())
+    colors = ["#4e79a7", "#f28e2b", "#e15759", "#76b7b2"]  # 蓝,橙,红,绿
+    markers = ["o", "s", "D", "^"]  # 圆形,方形,菱形,三角形
+    linestyles = ["-", "--", ":", "-."]  # 不同线型
+
+    # Step 6: 按照 mid_frame 分组绘制每条折线
+    for i, mid_frame in enumerate(mid_frames):
+        mid_frame_data = df[df["mid_frame"] == mid_frame]
+
+        # 按 prompt_type 分组绘制每条折线
+        # prompt_types = sorted(mid_frame_data["prompt_type"].unique())
+        prompt_types = ["box", "mask"]
+        for j, prompt in enumerate(prompt_types):
+            prompt_data = mid_frame_data[mid_frame_data["prompt_type"] == prompt]
+            if not prompt_data.empty:
+                # 按 obj_num 排序
+                prompt_data = prompt_data.sort_values("obj_num")
+                ax.plot(
+                    prompt_data["obj_num"],
+                    prompt_data["time_cost"],
+                    label=f"{prompt}_{mid_frame}",
+                    color=colors[i % len(colors)],
+                    marker=markers[j % len(markers)],
+                    linestyle=linestyles[i % len(linestyles)],
+                    linewidth=1.5,
+                    markersize=6,
+                    markeredgecolor="black",
+                    markeredgewidth=0.5,
+                    zorder=3,
+                )
+            else:
+                print(
+                    f"⚠️ No data found for mid_frame '{mid_frame}' and prompt_type '{prompt}'"
+                )
+
+    # Step 7: 设置坐标轴标签
+    ax.set_xlabel("Object Number", labelpad=5)
+    ax.set_ylabel("Time Cost (s)", labelpad=5)
+
+    # Step 8: 设置图例
+    # 图例放在左上
+
+    ax.legend(
+        title="Prompt Type",
+        frameon=True,
+        edgecolor="black",
+        facecolor="white",
+        loc="upper left",
+        bbox_to_anchor=(0, 1),
+        fontsize=8,
+        ncol=1,
+    )
+
+    # Step 9: 设置网格线
+    ax.grid(True, linestyle="--", alpha=0.4, zorder=0)
+
+    # Step 10: 设置x轴为整数刻度（如果obj_num是整数）
+    obj_nums = sorted(df["obj_num"].unique())
+    if all(isinstance(x, (int, float)) and x.is_integer() for x in obj_nums):
+        ax.set_xticks(obj_nums)
+
+    # Step 11: 调整边框线宽
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.8)
+
+    # Step 12: 紧凑布局
+    plt.tight_layout()
+
+    # Step 13: 保存图像
+    if save_path:
+        if save_path.endswith(".tif"):
+            plt.savefig(
+                save_path,
+                format="tiff",
+                dpi=dpi,
+                pil_kwargs={"compression": "tiff_lzw"},
+            )
+        else:
+            plt.savefig(save_path, dpi=dpi, bbox_inches="tight")
+
+    plt.show()
+
+
 # 示例：绘制iou_threshold=0.x时的柱状图
 # plot_f1_by_midframe_bar(iou_threshold=0.4)
 
@@ -598,28 +903,54 @@ def get_f1_vs_iou_threshold_data(mid_frame):
 # )
 
 # 绘制mid_frame=x时的曲线
-df = pd.read_csv("./charts/output.csv")
-# mid_frame_value = 0
-# plot_f1_by_iou_threshold(
-#     mid_frame_value=mid_frame_value,
-#     save_path=f"f1_by_iou_midframe{mid_frame_value}.png",
-#     figsize=(6, 4),
-#     dpi=300,
-# )
+# df = pd.read_csv("./charts/output.csv")
+# # mid_frame_value = 0
+# # plot_f1_by_iou_threshold(
+# #     mid_frame_value=mid_frame_value,
+# #     save_path=f"f1_by_iou_midframe{mid_frame_value}.png",
+# #     figsize=(6, 4),
+# #     dpi=300,
+# # )
 
-# iou_threshold = 0.5
-# plot_f1_by_midframe(
-#     iou_threshold=iou_threshold,
-#     save_path=f"f1_by_midframe_iou{iou_threshold}.png",
-#     figsize=(6, 4),
-#     dpi=300,
-# )
+# # iou_threshold = 0.5
+# # plot_f1_by_midframe(
+# #     iou_threshold=iou_threshold,
+# #     save_path=f"f1_by_midframe_iou{iou_threshold}.png",
+# #     figsize=(6, 4),
+# #     dpi=300,
+# # )
 
 
-# result_data = get_f1_vs_midframe_data(0.5)
-result_data = get_f1_vs_iou_threshold_data(0)
-# 查看整理好的数据
-print(result_data.head())
+# # result_data = get_f1_vs_midframe_data(0.5)
+# result_data = get_f1_vs_iou_threshold_data(0)
+# # 查看整理好的数据
+# print(result_data.head())
 
-# 将数据保存为CSV
-result_data.to_csv("f1_vs_iou_threshold_midframe0_data.csv", index=False)
+# # 将数据保存为CSV
+# result_data.to_csv("f1_vs_iou_threshold_midframe0_data.csv", index=False)
+
+# 绘制不同prompt_type、不同obj_num的显存占用对比
+# plot_memory_by_obj_num(save_path="plot_memory_by_obj_num.tif")
+
+# 绘制不同prompt_type、不同obj_num的时间对比
+# plot_timecost_by_obj_num(save_path="plot_timecost_by_obj_num.tif")
+
+
+# 读取原始CSV文件
+df = pd.read_csv("log.csv")
+print(df.head())
+
+# 获取所有数据行的索引
+all_indices = df.index.tolist()
+
+# 选择单数行（第1、3、5...行）→ 对应索引为偶数（因为从0开始）
+odd_rows = df.iloc[::2]  # 步长为2，从第0行开始
+
+# 选择双数行（第2、4、6...行）→ 对应索引为奇数
+even_rows = df.iloc[1::2]  # 步长为2，从第1行开始
+
+# 将单数行保存为新的CSV文件
+odd_rows.to_csv("odd_rows.csv", index=False)
+
+# 将双数行保存为新的CSV文件
+even_rows.to_csv("even_rows.csv", index=False)
