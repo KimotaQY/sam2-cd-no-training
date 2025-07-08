@@ -271,83 +271,176 @@ def step_one(
         # 获取prompts
         # prompt_objs = prompts.get("T1" if i == 0 else "T2", [])
 
-        # 获取追踪结果
-        # run propagation throughout the video and collect the results in a dict
-        video_segments = (
-            {}
-        )  # video_segments contains the per-frame segmentation results
-        for idx, item in enumerate(masks):
-            if label_type == "whu":
-                mask, (x, y, w, h), points = item.values()
-            else:
-                box = item.get("bbox")
-                score = item.get("score")
-                # if score < 0.7:
-                #     continue
-
-            ann_list = []
-            for frame_idx in range(mid_frame + 1):
-                if prompt_type == "points":
-                    # 使用points
-                    labels = [1]
-                    ann_list.append(
-                        {
-                            "ann_frame_idx": frame_idx,
-                            "ann_obj_id": idx + 1,
-                            "points": points,
-                            "labels": labels,
-                            # "box": np.array([x, y, x + w, y + h]),
-                        }
-                    )
-                elif prompt_type == "box":
-                    # 使用box
-                    ann_list.append(
-                        {
-                            "ann_frame_idx": frame_idx,
-                            "ann_obj_id": idx + 1,
-                            "box": (
-                                np.array([x, y, x + w, y + h])
-                                if label_type == "whu"
-                                else np.array(box)
-                            ),
-                        }
-                    )
+        # 每栋建筑单独预测
+        def single_building_predict():
+            # 获取追踪结果
+            video_segments = (
+                {}
+            )  # video_segments contains the per-frame segmentation results
+            for idx, item in enumerate(masks):
+                if label_type == "whu":
+                    mask, (x, y, w, h), points = item.values()
                 else:
-                    # 使用mask
-                    ann_list.append(
-                        {
-                            "ann_frame_idx": frame_idx,
-                            "ann_obj_id": idx + 1,
-                            "mask": mask,
-                        }
-                    )
+                    box = item.get("bbox")
+                    score = item.get("score")
+                    # if score < 0.7:
+                    #     continue
 
-            # 每个建筑单独预测
-            # 将ann_list导入predictor
-            try:
-                for index, item in enumerate(ann_list):
-                    _, out_obj_ids, out_mask_logits = add_new_obj(
-                        **item, predictor=predictor, inference_state=inference_state
-                    )
-
-            except Exception as e:
-                raise e
-
-            if len(ann_list) != 0:
-                for (
-                    out_frame_idx,
-                    out_obj_ids,
-                    out_mask_logits,
-                ) in predictor.propagate_in_video(inference_state):
-                    if out_frame_idx not in video_segments:
-                        video_segments[out_frame_idx] = {}
-                    for i, out_obj_id in enumerate(out_obj_ids):
-                        video_segments[out_frame_idx][out_obj_id] = (
-                            (out_mask_logits[i] > 0.0).cpu().numpy()
+                ann_list = []
+                for frame_idx in range(mid_frame + 1):
+                    if prompt_type == "points":
+                        # 使用points
+                        labels = [1]
+                        ann_list.append(
+                            {
+                                "ann_frame_idx": frame_idx,
+                                "ann_obj_id": idx + 1,
+                                "points": points,
+                                "labels": labels,
+                                # "box": np.array([x, y, x + w, y + h]),
+                            }
+                        )
+                    elif prompt_type == "box":
+                        # 使用box
+                        ann_list.append(
+                            {
+                                "ann_frame_idx": frame_idx,
+                                "ann_obj_id": idx + 1,
+                                "box": (
+                                    np.array([x, y, x + w, y + h])
+                                    if label_type == "whu"
+                                    else np.array(box)
+                                ),
+                            }
+                        )
+                    else:
+                        # 使用mask
+                        ann_list.append(
+                            {
+                                "ann_frame_idx": frame_idx,
+                                "ann_obj_id": idx + 1,
+                                "mask": mask,
+                            }
                         )
 
-            predictor.reset_state(inference_state)
+                # 每栋建筑单独预测
+                # 将ann_list导入predictor
+                try:
+                    for index, item in enumerate(ann_list):
+                        _, out_obj_ids, out_mask_logits = add_new_obj(
+                            **item, predictor=predictor, inference_state=inference_state
+                        )
 
+                except Exception as e:
+                    raise e
+
+                if len(ann_list) != 0:
+                    for (
+                        out_frame_idx,
+                        out_obj_ids,
+                        out_mask_logits,
+                    ) in predictor.propagate_in_video(inference_state):
+                        if out_frame_idx not in video_segments:
+                            video_segments[out_frame_idx] = {}
+                        for i, out_obj_id in enumerate(out_obj_ids):
+                            video_segments[out_frame_idx][out_obj_id] = (
+                                (out_mask_logits[i] > 0.0).cpu().numpy()
+                            )
+
+                predictor.reset_state(inference_state)
+
+            return video_segments
+
+        # 所有建筑一起预测
+        def predict_all_buildings(seg_len=50):
+            video_segments = (
+                {}
+            )  # video_segments contains the per-frame segmentation results
+
+            for frame_idx in range(mid_frame + 1):
+
+                # 将masks按seg_len进行分段
+                segment = []
+                for i in range(0, len(masks), seg_len):
+                    segment.append(masks[i : i + seg_len])
+                    # print(segment)
+
+                if len(masks) > 100:
+                    print("too many masks")
+
+                for seg_idx, seg_masks in enumerate(segment):
+                    ann_list = []
+                    for idx, item in enumerate(seg_masks):
+                        if label_type == "whu":
+                            mask, (x, y, w, h), points = item.values()
+                        else:
+                            box = item.get("bbox")
+                            score = item.get("score")
+
+                        if prompt_type == "points":
+                            # 使用points
+                            labels = [1]
+                            ann_list.append(
+                                {
+                                    "ann_frame_idx": frame_idx,
+                                    "ann_obj_id": idx + 1 + seg_idx * seg_len,
+                                    "points": points,
+                                    "labels": labels,
+                                    # "box": np.array([x, y, x + w, y + h]),
+                                }
+                            )
+                        elif prompt_type == "box":
+                            # 使用box
+                            ann_list.append(
+                                {
+                                    "ann_frame_idx": frame_idx,
+                                    "ann_obj_id": idx + 1 + seg_idx * seg_len,
+                                    "box": (
+                                        np.array([x, y, x + w, y + h])
+                                        if label_type == "whu"
+                                        else np.array(box)
+                                    ),
+                                }
+                            )
+                        else:
+                            # 使用mask
+                            ann_list.append(
+                                {
+                                    "ann_frame_idx": frame_idx,
+                                    "ann_obj_id": idx + 1 + seg_idx * seg_len,
+                                    "mask": mask,
+                                }
+                            )
+
+                    # 将ann_list导入predictor
+                    try:
+                        for index, item in enumerate(ann_list):
+                            _, out_obj_ids, out_mask_logits = add_new_obj(
+                                **item,
+                                predictor=predictor,
+                                inference_state=inference_state,
+                            )
+                    except Exception as e:
+                        raise e
+
+                    if len(ann_list) != 0:
+                        for (
+                            out_frame_idx,
+                            out_obj_ids,
+                            out_mask_logits,
+                        ) in predictor.propagate_in_video(inference_state):
+                            if out_frame_idx not in video_segments:
+                                video_segments[out_frame_idx] = {}
+                            for i, out_obj_id in enumerate(out_obj_ids):
+                                video_segments[out_frame_idx][out_obj_id] = (
+                                    (out_mask_logits[i] > 0.0).cpu().numpy()
+                                )
+
+                    predictor.reset_state(inference_state)
+
+            return video_segments
+
+        video_segments = predict_all_buildings()
         # mask合并显示
         segments_len = len(video_segments)
         if segments_len == 0:
