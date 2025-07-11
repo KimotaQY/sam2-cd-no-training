@@ -1,10 +1,11 @@
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 # 读取CSV文件
-df = pd.read_csv("output.csv")
+df = pd.read_csv("test_output.csv")
 
 # 查看数据结构
 print(df.head())
@@ -81,7 +82,15 @@ def plot_f1_by_iou_seaborn(mid_frame_value, save_path=None):
     plt.show()
 
 
-def plot_f1_by_midframe(iou_threshold, save_path=None, figsize=(6, 4), dpi=300):
+def plot_f1_by_midframe(
+    iou_threshold,
+    prompt_type,
+    diff_frame_num,
+    save_path=None,
+    figsize=(6, 4),
+    dpi=300,
+    style="default",
+):
     """
     绘制符合SCI期刊标准的折线图，展示不同model_type的f1随mid_frame变化
 
@@ -90,31 +99,59 @@ def plot_f1_by_midframe(iou_threshold, save_path=None, figsize=(6, 4), dpi=300):
         save_path: 图片保存路径(可选)
         figsize: 图像尺寸(英寸)
         dpi: 分辨率
+        style: 样式类型 ("default" 或 "large")
     """
     # 筛选指定iou阈值的数据
-    subset = df[df["iou_threshold"] == iou_threshold].copy()
+    subset = df[
+        (df["iou_threshold"] == iou_threshold)
+        & (df["prompt_type"] == prompt_type)
+        & (df["diff_frame_num"] == diff_frame_num)
+    ].copy()
 
-    # 设置SCI期刊推荐的样式
-    plt.style.use("default")  # 重置为默认样式
-    plt.rcParams.update(
-        {
-            "font.family": "Arial",  # 推荐使用Arial或Times New Roman
+    # 设置不同样式的字体大小和符号等参数
+    if style == "large":
+        font_settings = {
+            "font.family": "Arial",  # 或 'Times New Roman'
+            "font.size": 14,
+            "axes.labelsize": 16,
+            "axes.titlesize": 18,
+            "xtick.labelsize": 14,
+            "ytick.labelsize": 14,
+            "legend.fontsize": 14,
+            "lines.linewidth": 2,
+            "lines.markersize": 8,
+            "xtick.major.width": 1.0,
+            "ytick.major.width": 1.0,
+            "axes.linewidth": 1.0,
+        }
+    else:
+        font_settings = {
+            "font.family": "Arial",  # 或 'Times New Roman'
             "font.size": 9,
             "axes.labelsize": 10,
             "axes.titlesize": 11,
             "xtick.labelsize": 9,
             "ytick.labelsize": 9,
             "legend.fontsize": 9,
-            "figure.dpi": dpi,
-            "savefig.dpi": dpi,
-            "savefig.bbox": "tight",
-            "axes.linewidth": 0.8,
             "lines.linewidth": 1.5,
             "lines.markersize": 6,
             "xtick.major.width": 0.8,
             "ytick.major.width": 0.8,
-            "grid.linewidth": 0.6,
-            "grid.alpha": 0.4,
+            "axes.linewidth": 0.8,
+        }
+
+    # 设置SCI期刊推荐的样式
+    plt.style.use("default")  # 重置为默认样式
+    plt.rcParams.update(
+        {
+            **{
+                "figure.dpi": dpi,
+                "savefig.dpi": dpi,
+                "savefig.bbox": "tight",
+                "grid.linewidth": 0.6,
+                "grid.alpha": 0.4,
+            },
+            **font_settings,
         }
     )
 
@@ -133,7 +170,7 @@ def plot_f1_by_midframe(iou_threshold, save_path=None, figsize=(6, 4), dpi=300):
 
     # 绘制每条折线
     for i, model in enumerate(["t", "s", "b+", "l"]):
-        model_data = subset[subset["Model_type"] == model]
+        model_data = subset[subset["model_type"] == model]
         if not model_data.empty:
             # 按mid_frame排序
             model_data = model_data.sort_values("mid_frame")
@@ -156,14 +193,15 @@ def plot_f1_by_midframe(iou_threshold, save_path=None, figsize=(6, 4), dpi=300):
     ax.set_ylabel("F1 Score", labelpad=5)
 
     # 设置图例
-    ax.legend(
-        title="Model Type",
-        frameon=True,
-        edgecolor="black",
-        facecolor="white",
-        # bbox_to_anchor=(1.02, 1),  # 将图例放在图形外侧右侧
-        loc="upper right",
-    )
+    if style == "default":
+        ax.legend(
+            title="Model Type",
+            frameon=True,
+            edgecolor="black",
+            facecolor="white",
+            # bbox_to_anchor=(1.02, 1),  # 将图例放在图形外侧右侧
+            loc="upper right",
+        )
 
     # 设置网格线
     ax.grid(True, linestyle="--", alpha=0.4, zorder=0)
@@ -198,7 +236,8 @@ def plot_f1_by_midframe(iou_threshold, save_path=None, figsize=(6, 4), dpi=300):
         else:
             plt.savefig(save_path, dpi=dpi, bbox_inches="tight")
 
-    plt.show()
+    # plt.show()
+    plt.close()
 
 
 def plot_f1_by_midframe_bar(iou_threshold, save_path=None):
@@ -256,7 +295,15 @@ def plot_f1_by_midframe_bar(iou_threshold, save_path=None):
     plt.show()
 
 
-def plot_f1_by_iou_threshold(mid_frame_value, save_path=None, figsize=(6, 4), dpi=300):
+def plot_f1_by_iou_threshold(
+    mid_frame_value,
+    prompt_type,
+    diff_frame_num=1,
+    save_path=None,
+    figsize=(6, 4),
+    dpi=300,
+    style="default",
+):
     """
     绘制符合SCI期刊标准的折线图，展示不同model_type的f1随iou阈值变化
 
@@ -265,14 +312,33 @@ def plot_f1_by_iou_threshold(mid_frame_value, save_path=None, figsize=(6, 4), dp
         save_path: 图片保存路径(可选)
         figsize: 图像尺寸(英寸)
         dpi: 分辨率
+        style: 样式类型 ("default" 或 "large")
     """
     # 筛选指定mid_frame的数据
-    subset = df[df["mid_frame"] == mid_frame_value].copy()
+    subset = df[
+        (df["mid_frame"] == mid_frame_value)
+        & (df["prompt_type"] == prompt_type)
+        & (df["diff_frame_num"] == diff_frame_num)
+    ].copy()
 
-    # 设置SCI期刊推荐的样式
-    plt.style.use("default")  # 重置为默认样式
-    plt.rcParams.update(
-        {
+    # 设置不同样式的字体大小和符号等参数
+    if style == "large":
+        font_settings = {
+            "font.family": "Arial",  # 或 'Times New Roman'
+            "font.size": 14,
+            "axes.labelsize": 16,
+            "axes.titlesize": 18,
+            "xtick.labelsize": 14,
+            "ytick.labelsize": 14,
+            "legend.fontsize": 14,
+            "lines.linewidth": 2,
+            "lines.markersize": 8,
+            "xtick.major.width": 1.0,
+            "ytick.major.width": 1.0,
+            "axes.linewidth": 1.0,
+        }
+    else:
+        font_settings = {
             "font.family": "Arial",  # 或 'Times New Roman'
             "font.size": 9,
             "axes.labelsize": 10,
@@ -280,16 +346,25 @@ def plot_f1_by_iou_threshold(mid_frame_value, save_path=None, figsize=(6, 4), dp
             "xtick.labelsize": 9,
             "ytick.labelsize": 9,
             "legend.fontsize": 9,
-            "figure.dpi": dpi,
-            "savefig.dpi": dpi,
-            "savefig.bbox": "tight",
-            "axes.linewidth": 0.8,
             "lines.linewidth": 1.5,
             "lines.markersize": 6,
             "xtick.major.width": 0.8,
             "ytick.major.width": 0.8,
-            "grid.linewidth": 0.6,
-            "grid.alpha": 0.4,
+            "axes.linewidth": 0.8,
+        }
+
+    # 设置SCI期刊推荐的样式
+    plt.style.use("default")  # 重置为默认样式
+    plt.rcParams.update(
+        {
+            **{
+                "figure.dpi": dpi,
+                "savefig.dpi": dpi,
+                "savefig.bbox": "tight",
+                "grid.linewidth": 0.6,
+                "grid.alpha": 0.4,
+            },
+            **font_settings,
         }
     )
 
@@ -305,7 +380,7 @@ def plot_f1_by_iou_threshold(mid_frame_value, save_path=None, figsize=(6, 4), dp
 
     # 绘制每条折线
     for i, model in enumerate(["t", "s", "b+", "l"]):
-        model_data = subset[subset["Model_type"] == model]
+        model_data = subset[subset["model_type"] == model]
         if not model_data.empty:
             # 按iou_threshold排序
             model_data = model_data.sort_values("iou_threshold")
@@ -328,13 +403,14 @@ def plot_f1_by_iou_threshold(mid_frame_value, save_path=None, figsize=(6, 4), dp
     ax.set_ylabel("F1 Score", labelpad=5)
 
     # 设置图例
-    ax.legend(
-        title="Model Param",
-        frameon=True,
-        edgecolor="black",
-        facecolor="white",
-        loc="upper right",
-    )
+    if style == "default":
+        ax.legend(
+            title="Model Param",
+            frameon=True,
+            edgecolor="black",
+            facecolor="white",
+            loc="upper right",
+        )
 
     # 设置网格线
     ax.grid(True, linestyle="--", alpha=0.4, zorder=0)
@@ -366,7 +442,8 @@ def plot_f1_by_iou_threshold(mid_frame_value, save_path=None, figsize=(6, 4), dp
         else:
             plt.savefig(save_path, dpi=dpi, bbox_inches="tight")
 
-    plt.show()
+    # plt.show()
+    plt.close()
 
 
 def plot_sci_style_barchart(
@@ -576,7 +653,7 @@ def get_f1_vs_iou_threshold_data(mid_frame):
     return data_pivot
 
 
-def plot_memory_by_obj_num(save_path=None, figsize=(6, 4), dpi=300):
+def plot_memory_by_obj_num(save_path=None, figsize=(6, 4), dpi=300, model_type=None):
     """
     绘制符合SCI期刊标准的折线图，展示不同 prompt_type、mid_frame 的 max_memory_usage 随 obj_num 变化
 
@@ -599,6 +676,8 @@ def plot_memory_by_obj_num(save_path=None, figsize=(6, 4), dpi=300):
     even_rows = df.iloc[1::2]  # 步长为2，从第1行开始
 
     df = even_rows
+    if model_type is not None:
+        df = df[df["model_type"] == model_type]
 
     # 示例输出前几行
     # print("单数行数据:")
@@ -752,7 +831,9 @@ def plot_timecost_by_obj_num(save_path=None, figsize=(6, 4), dpi=300):
     # 选择双数行（第2、4、6...行）→ 对应索引为奇数
     even_rows = df.iloc[1::2]  # 步长为2，从第1行开始
 
-    df = even_rows
+    # df = even_rows
+    df = even_rows[even_rows["model_type"] == "t"]
+    # df = df[df["prompt_type"] == "box"]
 
     # 示例输出前几行
     # print("单数行数据:")
@@ -881,6 +962,327 @@ def plot_timecost_by_obj_num(save_path=None, figsize=(6, 4), dpi=300):
     plt.show()
 
 
+def plot_boxplot_iou_vs_f1(
+    save_path=None,
+    figsize=(10, 6),
+    dpi=300,
+    style="default",
+    model_type=None,
+    prompt_type=None,
+):
+    """
+    绘制箱线图：x轴为IoU阈值，y轴为F1得分
+
+    参数:
+        save_path: 图片保存路径(可选)
+        figsize: 图像尺寸(英寸)
+        dpi: 分辨率
+    """
+    plt.figure(figsize=figsize, dpi=dpi)
+
+    subset = df.copy()
+    if model_type is not None:
+        subset = subset[subset["model_type"] == model_type]
+    if prompt_type is not None:
+        subset = subset[subset["prompt_type"] == prompt_type]
+
+    # 设置不同样式的字体大小和符号等参数
+    font_scale = 1.0 if style == "default" else 2.0
+
+    font_settings = {
+        "font.family": "Arial",
+        "font.size": 10 * font_scale,
+        "axes.labelsize": 12 * font_scale,
+        "xtick.labelsize": 10 * font_scale,
+        "ytick.labelsize": 10 * font_scale,
+        "legend.fontsize": 10 * font_scale,
+    }
+    boxprops = {"linewidth": 1 * font_scale, "edgecolor": "black"}
+    medianprops = {"linewidth": 1 * font_scale, "color": "red"}
+
+    sns.set(style="whitegrid")
+    plt.rcParams.update(font_settings)
+
+    ax = sns.boxplot(
+        data=subset,
+        x="iou_threshold",
+        y="f1",
+        palette="Set2",
+        boxprops=boxprops,
+        medianprops=medianprops,
+        width=0.5,
+    )
+
+    ax.set_xlabel("IoU Threshold", labelpad=10)
+    ax.set_ylabel("F1 Score", labelpad=10)
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=dpi, bbox_inches="tight")
+
+    plt.show()
+
+
+def plot_boxplot_model_type_vs_f1(
+    save_path=None, figsize=(10, 6), dpi=300, style="default", diff_frame_num=None
+):
+    """
+    绘制箱线图：x轴为模型参数名，y轴为F1得分
+
+    参数:
+        save_path: 图片保存路径(可选)
+        figsize: 图像尺寸(英寸)
+        dpi: 分辨率
+    """
+    plt.figure(figsize=figsize, dpi=dpi)
+
+    # 映射简写模型类型到完整名称
+    model_param = {"t": "Tiny", "s": "Small", "b+": "Base+", "l": "Large"}
+    df["Model_type_full"] = df["model_type"].map(model_param)
+    subset = df.copy()
+    if diff_frame_num is not None:
+        subset = df[(df["diff_frame_num"] == diff_frame_num)].copy()
+
+    # 设置不同样式的字体大小和符号等参数
+    font_scale = 1.0 if style == "default" else 2.0
+
+    font_settings = {
+        "font.family": "Arial",
+        "font.size": 10 * font_scale,
+        "axes.labelsize": 12 * font_scale,
+        "xtick.labelsize": 10 * font_scale,
+        "ytick.labelsize": 10 * font_scale,
+        "legend.fontsize": 10 * font_scale,
+    }
+    boxprops = {"linewidth": 1 * font_scale, "edgecolor": "black"}
+    medianprops = {"linewidth": 1 * font_scale, "color": "red"}
+    sns.set(style="whitegrid")
+    plt.rcParams.update(font_settings)
+
+    ax = sns.boxplot(
+        data=subset,
+        x="Model_type_full",
+        y="f1",
+        palette="Set2",
+        boxprops=boxprops,
+        medianprops=medianprops,
+        width=0.5,
+    )
+
+    ax.set_xlabel("Model Type", labelpad=10)
+    ax.set_ylabel("F1 Score", labelpad=10)
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=dpi, bbox_inches="tight")
+
+    plt.show()
+
+
+def plot_boxplot_mid_frame_vs_f1(
+    save_path=None,
+    figsize=(10, 6),
+    dpi=300,
+    style="default",
+    diff_frame_num=None,
+    model_type=None,
+    prompt_type=None,
+):
+    """
+    绘制箱线图：x轴为中间帧数量，y轴为F1得分
+
+    参数:
+        save_path: 图片保存路径(可选)
+        figsize: 图像尺寸(英寸)
+        dpi: 分辨率
+    """
+    plt.figure(figsize=figsize, dpi=dpi)
+
+    # subset = df.copy()
+    subset = df[(df["mid_frame"].isin([1, 2, 3]))].copy()
+    if diff_frame_num is not None:
+        subset = df[(df["diff_frame_num"] == diff_frame_num)].copy()
+    if model_type is not None:
+        subset = subset[subset["model_type"] == model_type]
+    if prompt_type is not None:
+        subset = subset[subset["prompt_type"] == prompt_type]
+
+    # 设置不同样式的字体大小和符号等参数
+    font_scale = 1.0 if style == "default" else 2.0
+
+    font_settings = {
+        "font.family": "Arial",
+        "font.size": 10 * font_scale,
+        "axes.labelsize": 12 * font_scale,
+        "xtick.labelsize": 10 * font_scale,
+        "ytick.labelsize": 10 * font_scale,
+        "legend.fontsize": 10 * font_scale,
+    }
+    boxprops = {"linewidth": 1 * font_scale, "edgecolor": "black"}
+    medianprops = {"linewidth": 1 * font_scale, "color": "red"}
+    sns.set(style="whitegrid")
+    plt.rcParams.update(font_settings)
+
+    ax = sns.boxplot(
+        data=subset,
+        x="mid_frame",
+        y="f1",
+        palette="Set2",
+        boxprops=boxprops,
+        medianprops=medianprops,
+        width=0.5,
+    )
+
+    ax.set_xlabel("Mid Frame", labelpad=10)
+    ax.set_ylabel("F1 Score", labelpad=10)
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=dpi, bbox_inches="tight")
+
+    plt.show()
+
+
+def plot_timecost_by_obj_num_new(save_path=None, figsize=(6, 4), dpi=300, show_ci=True):
+    """
+    绘制符合SCI期刊标准的折线图（增强版），展示不同 prompt_type、mid_frame 的 time_cost 随 obj_num 变化
+
+    参数:
+        save_path: 图片保存路径(可选)
+        figsize: 图像尺寸(英寸)
+        dpi: 分辨率
+        show_ci: 是否显示置信区间
+    """
+    df = pd.read_csv("log.csv")
+    all_indices = df.index.tolist()
+    odd_rows = df.iloc[::2]
+    even_rows = df.iloc[1::2]
+    # df_data = even_rows[even_rows["model_type"] == "l"]
+    df_data = even_rows
+
+    # 数据预处理
+    df_data["obj_num"] = pd.to_numeric(df_data["obj_num"], errors="coerce")
+    df_data["time_cost"] = pd.to_numeric(df_data["time_cost"], errors="coerce")
+    df_data.dropna(
+        subset=["obj_num", "time_cost", "prompt_type", "mid_frame"], inplace=True
+    )
+
+    # 样式设置
+    plt.style.use("default")
+    plt.rcParams.update(
+        {
+            "font.family": "Arial",
+            "font.size": 9,
+            "axes.labelsize": 10,
+            "xtick.labelsize": 9,
+            "ytick.labelsize": 9,
+            "legend.fontsize": 9,
+            "figure.dpi": dpi,
+            "savefig.bbox": "tight",
+            "axes.linewidth": 0.8,
+            "grid.linewidth": 0.6,
+            "grid.alpha": 0.4,
+        }
+    )
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    mid_frames = sorted(df_data["mid_frame"].unique())
+    prompt_types = ["box", "mask"]
+
+    # 颜色和样式定义
+    colors = ["#4e79a7", "#f28e2b", "#e15759", "#76b7b2"]  # 蓝,橙,红,绿
+    markers = ["o", "s", "D", "^"]
+    linestyles = ["-", "--", ":", "-."]
+
+    for i, mid_frame in enumerate(mid_frames):
+        mid_data = df_data[df_data["mid_frame"] == mid_frame]
+
+        for j, prompt in enumerate(prompt_types):
+            prompt_data = mid_data[mid_data["prompt_type"] == prompt].copy()
+
+            if not prompt_data.empty:
+                prompt_data = prompt_data.sort_values("obj_num")
+
+                # 计算95%置信区间
+                if show_ci:
+                    sns.lineplot(
+                        data=prompt_data,
+                        x="obj_num",
+                        y="time_cost",
+                        ci=95,
+                        n_boot=1000,
+                        color=colors[i % len(colors)],
+                        linestyle=linestyles[i % len(linestyles)],
+                        ax=ax,
+                    )
+
+                # 主折线
+                ax.plot(
+                    prompt_data["obj_num"],
+                    prompt_data["time_cost"],
+                    label=f"{prompt}_{mid_frame}",
+                    color=colors[i % len(colors)],
+                    marker=markers[j % len(markers)],
+                    linestyle=linestyles[i % len(linestyles)],
+                    linewidth=1.5,
+                    markersize=6,
+                    markeredgecolor="black",
+                    markeredgewidth=0.5,
+                    zorder=3,
+                )
+
+    # 坐标轴设置
+    ax.set_xlabel("Object Number", labelpad=5)
+    ax.set_ylabel("Time Cost (s)", labelpad=5)
+
+    # 图例设置
+    handles, labels = ax.get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    ax.legend(
+        by_label.values(),
+        by_label.keys(),
+        title="Prompt_MidFrame",
+        frameon=True,
+        edgecolor="black",
+        facecolor="white",
+        loc="upper left",
+        bbox_to_anchor=(0, 1),
+        fontsize=8,
+        ncol=1,
+        borderaxespad=0.0,
+    )
+
+    # 网格和布局
+    ax.grid(True, linestyle="--", alpha=0.4, zorder=0)
+    obj_nums = sorted(df_data["obj_num"].unique())
+    if all(isinstance(x, (int, float)) and x.is_integer() for x in obj_nums):
+        ax.set_xticks(obj_nums)
+
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.8)
+
+    plt.tight_layout()
+
+    if save_path:
+        if save_path.endswith(".tif"):
+            plt.savefig(
+                save_path,
+                format="tiff",
+                dpi=dpi,
+                pil_kwargs={"compression": "tiff_lzw"},
+            )
+        else:
+            plt.savefig(save_path, dpi=dpi, bbox_inches="tight")
+
+    plt.show()
+
+
+# output_dir = "output_plot/compare_diff_mid"
+# os.makedirs(output_dir, exist_ok=True)
+
 # 示例：绘制iou_threshold=0.x时的柱状图
 # plot_f1_by_midframe_bar(iou_threshold=0.4)
 
@@ -902,24 +1304,72 @@ def plot_timecost_by_obj_num(save_path=None, figsize=(6, 4), dpi=300):
 #     dpi=300,
 # )
 
-# 绘制mid_frame=x时的曲线
+###### 绘制mid_frame=x时的曲线
 # df = pd.read_csv("./charts/output.csv")
-# # mid_frame_value = 0
-# # plot_f1_by_iou_threshold(
-# #     mid_frame_value=mid_frame_value,
-# #     save_path=f"f1_by_iou_midframe{mid_frame_value}.png",
-# #     figsize=(6, 4),
-# #     dpi=300,
-# # )
+df = pd.read_csv("test_output.csv")
+# for mid_frame_value in [1, 2, 3]:
+#     for prompt_type in ["box", "points", "mask"]:
+#         for diff_frame_num in [1, -1]:
+#             # mid_frame_value = 3
+#             # prompt_type = "box"
+#             # diff_frame_num = 1
+#             save_path = os.path.join(
+#                 output_dir,
+#                 f"f1_by_iou_mid{mid_frame_value}_{prompt_type}_{diff_frame_num}.png",
+#             )
+#             plot_f1_by_iou_threshold(
+#                 mid_frame_value=mid_frame_value,
+#                 prompt_type=prompt_type,
+#                 diff_frame_num=diff_frame_num,
+#                 save_path=save_path,
+#                 figsize=(6, 4),
+#                 dpi=300,
+#                 style="large",
+#             )
 
-# # iou_threshold = 0.5
-# # plot_f1_by_midframe(
-# #     iou_threshold=iou_threshold,
-# #     save_path=f"f1_by_midframe_iou{iou_threshold}.png",
-# #     figsize=(6, 4),
-# #     dpi=300,
-# # )
+###### 绘制iou=x时的曲线
+# output_dir = "output_plot/compare_diff_mid"
+# os.makedirs(output_dir, exist_ok=True)
+# for iou_threshold in [0.3, 0.4, 0.5, 0.6, 0.7]:
+#     for prompt_type in ["box", "points", "mask"]:
+#         for diff_frame_num in [1, -1]:
+#             save_path = os.path.join(
+#                 output_dir,
+#                 f"f1_by_midframe_iou{iou_threshold}_{prompt_type}_{diff_frame_num}.png",
+#             )
+#             plot_f1_by_midframe(
+#                 iou_threshold=iou_threshold,
+#                 prompt_type=prompt_type,
+#                 diff_frame_num=diff_frame_num,
+#                 save_path=save_path,
+#                 figsize=(6, 4),
+#                 dpi=300,
+#                 style="large",
+#             )
 
+###### 绘制箱型图
+# output_dir = "output_plot/boxplot"
+# os.makedirs(output_dir, exist_ok=True)
+# for prompt_type in ["points", "box", "mask"]:
+#     # for model_type in ["t", "s", "b+", "l"]:
+#     # plot_boxplot_iou_vs_f1(
+#     #     save_path=os.path.join(output_dir, f"boxplot_iou_vs_f1_{prompt_type}.png"),
+#     #     style="large",
+#     #     prompt_type=prompt_type,
+#     # )
+#     plot_boxplot_mid_frame_vs_f1(
+#         save_path=os.path.join(
+#             output_dir, f"boxplot_mid_frame_vs_f1_{prompt_type}.png"
+#         ),
+#         style="large",
+#         prompt_type=prompt_type,
+#     )
+# plot_boxplot_model_type_vs_f1(
+#     diff_frame_num=-1,
+#     save_path=os.path.join(output_dir, "boxplot_model_type_vs_f1_d-1.png"),
+#     style="large",
+# )
+###### End ######
 
 # # result_data = get_f1_vs_midframe_data(0.5)
 # result_data = get_f1_vs_iou_threshold_data(0)
@@ -930,27 +1380,59 @@ def plot_timecost_by_obj_num(save_path=None, figsize=(6, 4), dpi=300):
 # result_data.to_csv("f1_vs_iou_threshold_midframe0_data.csv", index=False)
 
 # 绘制不同prompt_type、不同obj_num的显存占用对比
-# plot_memory_by_obj_num(save_path="plot_memory_by_obj_num.tif")
+# output_dir = "output_plot"
+# for model_type in ["t", "s", "b+", "l"]:
+#     save_path = os.path.join(output_dir, f"plot_memory_by_obj_num_{model_type}.png")
+#     plot_memory_by_obj_num(save_path=save_path, model_type=model_type)
 
-# 绘制不同prompt_type、不同obj_num的时间对比
-# plot_timecost_by_obj_num(save_path="plot_timecost_by_obj_num.tif")
+# # 绘制不同prompt_type、不同obj_num的时间对比
+# save_path = os.path.join(output_dir, "plot_timecost_by_obj_num.png")
+# plot_timecost_by_obj_num(save_path=save_path)
 
 
 # 读取原始CSV文件
-df = pd.read_csv("log.csv")
-print(df.head())
+# df = pd.read_csv("log.csv")
+# print(df.head())
 
-# 获取所有数据行的索引
-all_indices = df.index.tolist()
+# # 获取所有数据行的索引
+# all_indices = df.index.tolist()
 
-# 选择单数行（第1、3、5...行）→ 对应索引为偶数（因为从0开始）
-odd_rows = df.iloc[::2]  # 步长为2，从第0行开始
+# # 选择单数行（第1、3、5...行）→ 对应索引为偶数（因为从0开始）
+# odd_rows = df.iloc[::2]  # 步长为2，从第0行开始
 
-# 选择双数行（第2、4、6...行）→ 对应索引为奇数
-even_rows = df.iloc[1::2]  # 步长为2，从第1行开始
+# # 选择双数行（第2、4、6...行）→ 对应索引为奇数
+# even_rows = df.iloc[1::2]  # 步长为2，从第1行开始
 
-# 将单数行保存为新的CSV文件
-odd_rows.to_csv("odd_rows.csv", index=False)
+# # 将单数行保存为新的CSV文件
+# odd_rows.to_csv("odd_rows.csv", index=False)
 
-# 将双数行保存为新的CSV文件
-even_rows.to_csv("even_rows.csv", index=False)
+# # 将双数行保存为新的CSV文件
+# even_rows.to_csv("even_rows.csv", index=False)
+
+###### 计算平均值 ######
+# 读取CSV文件
+df = pd.read_csv("even_rows.csv")  # 替换为你的CSV文件路径
+
+# 指定要过滤的条件（可以根据需要修改）
+model_type_filter = "t"  # 示例 model_type
+mid_frame_filter = 1  # 示例 mid_frame
+prompt_type_filter = "box"  # 示例 prompt_type
+obj_num_filter = 100  # 示例 obj_num
+
+# 应用过滤条件
+filtered_data = df[
+    (df["model_type"] == model_type_filter)
+    & (df["mid_frame"] == mid_frame_filter)
+    & (df["prompt_type"] == prompt_type_filter)
+    & (df["obj_num"] == obj_num_filter)
+    & (df["time_cost"] < 2)
+]
+print(filtered_data.head())
+
+# 计算 time_cost 的平均值
+average_time_cost = filtered_data["time_cost"].mean()
+
+# 输出结果
+print(f"符合条件的 time_cost 平均值为: {average_time_cost}")
+
+###### End ######
