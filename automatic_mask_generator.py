@@ -1,3 +1,4 @@
+import json
 import os
 
 # if using Apple MPS, fall back to CPU for unsupported ops
@@ -64,13 +65,13 @@ def show_anns(anns, borders=True):
                 cv2.approxPolyDP(contour, epsilon=0.01, closed=True)
                 for contour in contours
             ]
-            cv2.drawContours(img, contours, -1, (0, 0, 1, 0.4), thickness=1)
+            cv2.drawContours(img, contours, -1, (0, 0, 1, 0.5), thickness=1)
 
     # cv2.imwrite("B_test_79.png", img * 255)
     ax.imshow(img)
 
 
-def overlay_mask_on_image_and_save(image, anns, output_path, borders=True):
+def overlay_mask_on_image_and_save(image, anns, output_path=None, borders=True):
     if len(anns) == 0:
         return
 
@@ -101,63 +102,141 @@ def overlay_mask_on_image_and_save(image, anns, output_path, borders=True):
     overlayed_img = cv2.addWeighted(image, 1, img, 0.5, 0)
 
     # Save the result
-    cv2.imwrite(output_path, overlayed_img)
+    if output_path is not None:
+        cv2.imwrite(output_path, overlayed_img)
 
 
-image = Image.open("E:\CD_datasets\LEVIR-CD\\test\A\\test_79.png")
-image = np.array(image.convert("RGB"))
+def save_mask_as_json(masks, output_dir, image_name):
+    # 创建输出目录
+    # output_dir = "output_masks_coco"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 准备 JSON 数据
+    json_data = []
+
+    for i, mask_info in enumerate(masks):
+        # 提取 RLE 编码
+        rle = mask_info["segmentation"]
+
+        # 将 RLE 转换为二值掩码（可选：用于调试或可视化）
+        # binary_mask = mask_utils.decode(rle)
+
+        # 构造要保存的数据结构
+        mask_entry = {
+            "id": i,
+            "area": int(mask_info["area"]),
+            "bbox": [int(x) for x in mask_info["bbox"]],  # 转换为整数列表
+            "point_coords": mask_info["point_coords"],
+            "predicted_iou": float(mask_info["predicted_iou"]),
+            "stability_score": float(mask_info["stability_score"]),
+            "rle": {"size": rle["size"], "counts": rle["counts"]},
+        }
+
+        json_data.append(mask_entry)
+
+    # 获取文件名除了后缀
+    image_name = os.path.splitext(image_name)[0]
+    # 保存为 JSON 文件
+    output_json_path = os.path.join(output_dir, f"{image_name}.json")
+    with open(output_json_path, "w") as f:
+        json.dump(json_data, f, indent=4)
+
+    print(f"掩码已保存为 COCO RLE 格式的 JSON 文件：{output_json_path}")
+
 
 from sam2.build_sam import build_sam2
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
+import gc
 
-model_obj = {
-    "t": {
-        "checkpoint": "sam2.1_hiera_tiny.pt",
-        "config": "sam2.1_hiera_t.yaml",
-    },
-    "s": {
-        "checkpoint": "sam2.1_hiera_small.pt",
-        "config": "sam2.1_hiera_s.yaml",
-    },
-    "b+": {
-        "checkpoint": "sam2.1_hiera_base_plus.pt",
-        "config": "sam2.1_hiera_b+.yaml",
-    },
-    "l": {
-        "checkpoint": "sam2.1_hiera_large.pt",
-        "config": "sam2.1_hiera_l.yaml",
-    },
-}
-model_type = "l"
-checkpoint = model_obj[model_type]["checkpoint"]
-config = model_obj[model_type]["config"]
-sam2_checkpoint = os.path.join("E:\CD_Checkpoints", checkpoint)
-model_cfg = os.path.join(
-    "E:\CD_projects\sam2-cd-no-training\sam2\configs\sam2.1", config
-)
+if __name__ == "__main__":
+    # 加载SAM2
+    model_obj = {
+        "t": {
+            "checkpoint": "sam2.1_hiera_tiny.pt",
+            "config": "sam2.1_hiera_t.yaml",
+        },
+        "s": {
+            "checkpoint": "sam2.1_hiera_small.pt",
+            "config": "sam2.1_hiera_s.yaml",
+        },
+        "b+": {
+            "checkpoint": "sam2.1_hiera_base_plus.pt",
+            "config": "sam2.1_hiera_b+.yaml",
+        },
+        "l": {
+            "checkpoint": "sam2.1_hiera_large.pt",
+            "config": "sam2.1_hiera_l.yaml",
+        },
+    }
+    for model_type in ["t"]:
+        for label_type in ["A", "B"]:
+            # model_type = "t"
+            checkpoint = model_obj[model_type]["checkpoint"]
+            config = model_obj[model_type]["config"]
+            sam2_checkpoint = os.path.join("E:/CD_Checkpoints", checkpoint)
+            model_cfg = os.path.join(
+                "E:/CD_projects/sam2-cd-no-training/sam2/configs/sam2.1", config
+            )
 
-sam2 = build_sam2(model_cfg, sam2_checkpoint, device=device, apply_postprocessing=False)
+            sam2 = build_sam2(
+                model_cfg, sam2_checkpoint, device=device, apply_postprocessing=False
+            )
 
-mask_generator = SAM2AutomaticMaskGenerator(
-    model=sam2,
-    points_per_side=64,
-    points_per_batch=128,
-    pred_iou_thresh=0.7,
-    stability_score_thresh=0.92,
-    stability_score_offset=0.7,
-    crop_n_layers=1,
-    box_nms_thresh=0.7,
-    crop_n_points_downscale_factor=2,
-    min_mask_region_area=25.0,
-    use_m2m=True,
-)
+            mask_generator = SAM2AutomaticMaskGenerator(
+                model=sam2,
+                points_per_side=64,
+                points_per_batch=128,
+                pred_iou_thresh=0.7,
+                stability_score_thresh=0.92,
+                stability_score_offset=0.7,
+                crop_n_layers=1,
+                box_nms_thresh=0.7,
+                crop_n_points_downscale_factor=2,
+                min_mask_region_area=25.0,
+                output_mode="coco_rle",
+                use_m2m=True,
+            )
 
-masks = mask_generator.generate(image)
+            # 创建输出目录
+            output_dir = f"E:/CD_datasets/LEVIR-CD/test/sam2/{label_type}_sam2_coco_rle_{model_type}"
+            # 判断输出目录是否存在
+            os.makedirs(output_dir, exist_ok=True)
+            json_result_names = os.listdir(output_dir)
+            json_result_names = [
+                os.path.splitext(json_result_name)[0]
+                for json_result_name in json_result_names
+            ]
+            # 读取图片名，过滤非文件名后缀
+            img_dir = f"E:/CD_datasets/LEVIR-CD/test/{label_type}"
+            img_names = os.listdir(img_dir)
+            img_names = [
+                img_name for img_name in img_names if img_name.endswith(".png")
+            ]
+            for i, img_name in enumerate(img_names):
+                # 跳过已存在的文件
+                if os.path.splitext(img_name)[0] in json_result_names:
+                    print(f"Skipping image {i+1}/{len(img_names)}: {img_name}")
+                    continue
+                else:
+                    print(f"Processing image {i+1}/{len(img_names)}: {img_name}")
 
-overlay_mask_on_image_and_save(image, masks, "A_test_79_mask.png")
+                image = Image.open(os.path.join(img_dir, img_name))
+                image = np.array(image.convert("RGB"))
 
-# plt.figure(figsize=(20, 20))
-# plt.imshow(image)
-# show_anns(masks)
-# plt.axis("off")
-# plt.show()
+                masks = mask_generator.generate(image)
+
+                # 保存掩码为JSON文件
+                save_mask_as_json(masks, output_dir, img_name)
+
+                # overlay_mask_on_image_and_save(image, masks)
+
+                # plt.figure(figsize=(20, 20))
+                # plt.imshow(image)
+                # show_anns(masks)
+                # plt.axis("off")
+                # plt.show()
+
+                # 清理显存和内存
+                del image, masks
+                torch.cuda.empty_cache()
+                gc.collect()
