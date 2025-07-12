@@ -11,6 +11,7 @@ import torch
 import matplotlib.pyplot as plt
 from PIL import Image
 from tools.extract_single_masks import extract_single_masks
+from pycocotools import mask as mask_utils
 
 
 def linear_color_interpolation(img1, img2, alpha):
@@ -174,6 +175,28 @@ def compute_mask_iou(mask1, mask2):
     return iou
 
 
+def compute_mask_iou_batch(masks1, masks2):
+    """
+    计算两组 mask 的 IoU 矩阵 (num_masks1 x num_masks2)
+    masks1: shape (num_masks1, H, W)
+    masks2: shape (num_masks2, H, W)
+    return: IoU matrix of shape (num_masks1, num_masks2)
+    """
+    # Flatten masks to binary vectors
+    masks1 = masks1.astype(bool).reshape(len(masks1), -1)  # (N1, H*W)
+    masks2 = masks2.astype(bool).reshape(len(masks2), -1)  # (N2, H*W)
+
+    # Compute intersection and union
+    intersection = masks1 @ masks2.T  # (N1, N2)
+    union = (
+        np.sum(masks1, axis=1)[:, None] + np.sum(masks2, axis=1)[None, :] - intersection
+    )
+
+    # Avoid division by zero
+    iou = intersection / union
+    return iou
+
+
 def merge_masks(masks_dict, compare_masks_dict=None, iou_threshold=0.5):
     """
     合并当前帧的masks，但跳过与对比帧中高IoU的物体
@@ -262,7 +285,7 @@ def step_one(
             label_path = os.path.join(label_dir, Path(img_name).stem + ".json")
             with open(label_path, "r") as f:
                 json_result = json.load(f)
-                masks = json_result["objects"]
+                masks = json_result if label_type == "sam2" else json_result["objects"]
         else:
             # 获取label中建筑物mask、box、points，并逐个赋予id进行追踪
             masks = extract_single_masks(os.path.join(label_dir, img_name))
@@ -271,7 +294,7 @@ def step_one(
         # 获取prompts
         # prompt_objs = prompts.get("T1" if i == 0 else "T2", [])
 
-        # 每栋建筑单独预测
+        # 每次单独追踪一个对象
         def single_building_predict():
             # 获取追踪结果
             video_segments = (
@@ -351,8 +374,8 @@ def step_one(
 
             return video_segments
 
-        # 所有建筑一起预测
-        def predict_all_buildings(seg_len=50):
+        # 一次追踪seg_len个对象
+        def predict_buildings_by_seglen(seg_len=50):
             video_segments = (
                 {}
             )  # video_segments contains the per-frame segmentation results
@@ -376,6 +399,11 @@ def step_one(
                         else:
                             box = item.get("bbox")
                             score = item.get("score")
+                            if label_type == "sam2":
+                                rle = item.get("rle")
+                                area = item.get("area")
+                                if area < 150:
+                                    continue
 
                         if prompt_type == "points":
                             # 使用points
@@ -404,11 +432,16 @@ def step_one(
                             )
                         else:
                             # 使用mask
+                            # binary_mask = mask_utils.decode(rle)
                             ann_list.append(
                                 {
                                     "ann_frame_idx": frame_idx,
                                     "ann_obj_id": idx + 1 + seg_idx * seg_len,
-                                    "mask": mask,
+                                    "mask": (
+                                        mask
+                                        if label_type == "whu"
+                                        else mask_utils.decode(rle) * 255
+                                    ),
                                 }
                             )
 
@@ -440,7 +473,7 @@ def step_one(
 
             return video_segments
 
-        video_segments = predict_all_buildings()
+        video_segments = predict_buildings_by_seglen()
         # mask合并显示
         segments_len = len(video_segments)
         if segments_len == 0:
