@@ -1,10 +1,11 @@
+import gc
 import os
 import cv2
 import numpy as np
 import torch
 import statistics
 
-from BiSAM_CD import step_one, compute_mask_iou
+from BiSAM_CD import step_one, compute_mask_iou, compute_mask_iou_batch
 from sam2.build_sam import build_sam2_video_predictor
 from tools.misc import binary_accuracy, AverageMeter
 from tools.extract_single_masks import extract_single_masks
@@ -60,26 +61,43 @@ def sum_masks_dict(masks_A, masks_B=None, iou_threshold=0.5):
             merged_mask = np.logical_or(merged_mask, mask > 0).astype(np.uint8)
         return merged_mask
 
-    # 逐个对比masks中的mask的iou，过高的移除
-    keys_to_remove = {"A": [], "B": []}
-    for obj_id_A, mask_A in masks_A.items():
-        mask_A_binary = (mask_A > 0).astype(np.uint8)
-        for obj_id_B, mask_B in masks_B.items():
-            mask_B_binary = (mask_B > 0).astype(np.uint8)
+    # # 逐个对比masks中的mask的iou，过高的移除
+    # keys_to_remove = {"A": [], "B": []}
+    # for obj_id_A, mask_A in masks_A.items():
+    #     mask_A_binary = (mask_A > 0).astype(np.uint8)
+    #     for obj_id_B, mask_B in masks_B.items():
+    #         mask_B_binary = (mask_B > 0).astype(np.uint8)
 
-            # 计算IoU（忽略全零mask的情况）
-            if np.any(mask_B_binary) or np.any(mask_A_binary):
-                iou = compute_mask_iou(mask_B_binary.flatten(), mask_A_binary.flatten())
-                if iou > iou_threshold:
-                    if obj_id_A not in keys_to_remove["A"]:
-                        keys_to_remove["A"].append(obj_id_A)
-                    if obj_id_B not in keys_to_remove["B"]:
-                        keys_to_remove["B"].append(obj_id_B)
-                    # # 删除字典中对应key
-                    # if obj_id_A in masks_A:
-                    #     del masks_A[obj_id_A]
-                    # if obj_id_B in masks_B:
-                    #     del masks_B[obj_id_B]
+    #         # 计算IoU（忽略全零mask的情况）
+    #         if np.any(mask_B_binary) or np.any(mask_A_binary):
+    #             iou = compute_mask_iou(mask_B_binary.flatten(), mask_A_binary.flatten())
+    #             if iou > iou_threshold:
+    #                 if obj_id_A not in keys_to_remove["A"]:
+    #                     keys_to_remove["A"].append(obj_id_A)
+    #                 if obj_id_B not in keys_to_remove["B"]:
+    #                     keys_to_remove["B"].append(obj_id_B)
+    #                 # # 删除字典中对应key
+    #                 # if obj_id_A in masks_A:
+    #                 #     del masks_A[obj_id_A]
+    #                 # if obj_id_B in masks_B:
+    #                 #     del masks_B[obj_id_B]
+
+    # 将 masks_A 和 masks_B 转换为 NumPy 数组
+    mask_array_A = np.array([m > 0 for m in masks_A.values()])
+    mask_array_B = np.array([m > 0 for m in masks_B.values()])
+
+    # 计算所有 mask 对的 IoU
+    iou_matrix = compute_mask_iou_batch(mask_array_A, mask_array_B)
+
+    # 找出需要删除的 key
+    keys_to_remove = {"A": [], "B": []}
+    for idx_A, obj_id_A in enumerate(masks_A.keys()):
+        for idx_B, obj_id_B in enumerate(masks_B.keys()):
+            if iou_matrix[idx_A, idx_B] > iou_threshold:
+                if obj_id_A not in keys_to_remove["A"]:
+                    keys_to_remove["A"].append(obj_id_A)
+                if obj_id_B not in keys_to_remove["B"]:
+                    keys_to_remove["B"].append(obj_id_B)
 
     for obj_id, mask in masks_A.items():
         if obj_id not in keys_to_remove["A"]:
@@ -343,8 +361,12 @@ def test(
     img_names = [p for p in os.listdir(T1) if os.path.splitext(p)[-1] in [".png"]]
 
     # 获取prompt的文件夹名称
-    prompt_folder_name = os.path.normpath(T2_label).split(os.sep)[-2]
-    prompt_folder_name = prompt_folder_name.split("_", 1)[1]
+    if label_type != "sam2":
+        prompt_folder_name = os.path.normpath(T2_label).split(os.sep)[-2]
+        prompt_folder_name = prompt_folder_name.split("_", 1)[1]
+    else:
+        prompt_folder_name = os.path.normpath(T2_label).split(os.sep)[-1]
+        prompt_folder_name = prompt_folder_name.split("_", 1)[1]
 
     output_dir = f"./logs/{dataset_name}/generate_{model_type}_{prompt_type}_mid{mid_frame}_{diff_frame_num}_iou{iou_threshold}/{prompt_folder_name}"
 
@@ -412,6 +434,7 @@ def test(
             if "predictor" in locals():
                 del predictor
             torch.cuda.empty_cache()
+            gc.collect()
 
         try:
             print(
@@ -471,8 +494,9 @@ if __name__ == "__main__":
         "E:/CD_datasets/LEVIR-CD/test/A",
         "E:/CD_datasets/LEVIR-CD/test/B",
         "E:/CD_datasets/LEVIR-CD/test/label",
-        "E:/CD_datasets/LEVIR-CD/test/owlv2/A_owlv2_large_[roof]/result",
-        "E:/CD_datasets/LEVIR-CD/test/owlv2/B_owlv2_large_[roof]/result",
-        "LEVIR-CD",
-        "box",
+        "E:/CD_datasets/LEVIR-CD/test/sam2/A_sam2_coco_rle_b+",
+        "E:/CD_datasets/LEVIR-CD/test/sam2/B_sam2_coco_rle_b+",
+        dataset_name="LEVIR-CD",
+        label_type="sam2",
+        prompt_type="mask",
     )

@@ -73,21 +73,75 @@ def test_prompt():
     script_path = r"E:\CD_projects\sam2-cd-no-training\\script_eval.py"
     module_name = "script_eval"  # 文件名（不带.py）
 
-    dataset_names = ["WHU-CD"]
+    dataset_names = ["WHU-CD", "LEVIR-CD"]
     for dataset_name in dataset_names:
 
-        test_path = f"E:/CD_datasets/{dataset_name}/test/owlv2"
+        # test_path = f"E:/CD_datasets/{dataset_name}/test/owlv2"
+        # # 获取test_path下的所有子目录，包含owlv2关键词
+        # test_dirs = [
+        #     dir.split("_", 1)[1] for dir in os.listdir(test_path) if "owlv2" in dir
+        # ]
+        # 去重
+        # test_dirs = list(set(test_dirs))
+
+        # iou_list = [0.5]
+        # mid_list = [1]
+        # diff_frame_num_list = [-1]
+        # model_obj = ["t", "s", "b+"]
+
+        # for model_type in model_obj:
+        #     for diff_frame_num in diff_frame_num_list:
+        #         for mid_frame in mid_list:
+        #             for iou in iou_list:
+        #                 for test_dir in test_dirs:
+        #                     T1 = f"E:/CD_datasets/{dataset_name}/test/A"
+        #                     T2 = f"E:/CD_datasets/{dataset_name}/test/B"
+        #                     diff_label_dir = f"E:/CD_datasets/{dataset_name}/test/label"
+        #                     T1_label = f"E:/CD_datasets/{dataset_name}/test/owlv2/A_{test_dir}/result"
+        #                     T2_label = f"E:/CD_datasets/{dataset_name}/test/owlv2/B_{test_dir}/result"
+
+        #                     # 要调用的函数名和参数
+        #                     function_name = "test"
+        #                     args = [
+        #                         model_type,
+        #                         mid_frame,
+        #                         diff_frame_num,
+        #                         iou,
+        #                         T1,
+        #                         T2,
+        #                         diff_label_dir,
+        #                         T1_label,
+        #                         T2_label,
+        #                         dataset_name,
+        #                     ]
+
+        #                     # 使用 conda run 执行目标环境的 Python
+        #                     cmd = [
+        #                         conda_path,
+        #                         "run",
+        #                         "-n",
+        #                         other_env_name,
+        #                         "python",
+        #                         "-c",
+        #                         f"import sys; sys.path.append(r'{script_dir}'); from {module_name} import {function_name}; {function_name}(*{args})",
+        #                     ]
+
+        #                     result = subprocess.run(cmd, capture_output=True, text=True)
+        #                     print(result.stdout)
+
+        test_path = f"E:/CD_datasets/{dataset_name}/test/sam2"
         # 获取test_path下的所有子目录，包含owlv2关键词
         test_dirs = [
-            dir.split("_", 1)[1] for dir in os.listdir(test_path) if "owlv2" in dir
+            dir.split("_", 1)[1] for dir in os.listdir(test_path) if "sam2" in dir
         ]
+        test_dirs = list(set(test_dirs))
 
         iou_list = [0.5]
         mid_list = [1]
         diff_frame_num_list = [-1]
-        model_obj = ["t", "s", "b+"]
+        model_obj = ["t", "s", "b+", "l"]
 
-        for model_type in model_obj:
+        for model_type in ["b+"]:
             for diff_frame_num in diff_frame_num_list:
                 for mid_frame in mid_list:
                     for iou in iou_list:
@@ -95,8 +149,12 @@ def test_prompt():
                             T1 = f"E:/CD_datasets/{dataset_name}/test/A"
                             T2 = f"E:/CD_datasets/{dataset_name}/test/B"
                             diff_label_dir = f"E:/CD_datasets/{dataset_name}/test/label"
-                            T1_label = f"E:/CD_datasets/{dataset_name}/test/owlv2/A_{test_dir}/result"
-                            T2_label = f"E:/CD_datasets/{dataset_name}/test/owlv2/B_{test_dir}/result"
+                            T1_label = (
+                                f"E:/CD_datasets/{dataset_name}/test/sam2/A_{test_dir}"
+                            )
+                            T2_label = (
+                                f"E:/CD_datasets/{dataset_name}/test/sam2/B_{test_dir}"
+                            )
 
                             # 要调用的函数名和参数
                             function_name = "test"
@@ -111,6 +169,8 @@ def test_prompt():
                                 T1_label,
                                 T2_label,
                                 dataset_name,
+                                "sam2",
+                                "mask",
                             ]
 
                             # 使用 conda run 执行目标环境的 Python
@@ -192,5 +252,5 @@ def test_time_memory_cost():
 
 if __name__ == "__main__":
     # test_params()
-    # test_prompt()
-    test_time_memory_cost()
+    test_prompt()
+    # test_time_memory_cost()
