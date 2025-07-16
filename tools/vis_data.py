@@ -447,7 +447,13 @@ def plot_f1_by_iou_threshold(
 
 
 def plot_sci_style_barchart(
-    iou_threshold, mid_frame, save_path=None, figsize=(6, 4), dpi=300
+    df,
+    iou_threshold,
+    mid_frame,
+    diff_frame_num=1,
+    save_path=None,
+    figsize=(6, 4),
+    dpi=300,
 ):
     """
     绘制符合SCI期刊标准的柱状图
@@ -461,19 +467,21 @@ def plot_sci_style_barchart(
     """
     # 筛选数据
     subset = df[
-        (df["iou_threshold"] == iou_threshold) & (df["mid_frame"] == mid_frame)
+        (df["iou_threshold"] == iou_threshold)
+        & (df["mid_frame"] == mid_frame)
+        & (df["diff_frame_num"] == diff_frame_num)
     ].copy()
 
     # 确保数据顺序一致
     model_order = ["tiny", "small", "base plus", "large"]  # 您可以根据需要调整顺序
     prompt_order = ["points", "box", "mask"]  # 您可以根据需要调整顺序
-    subset["Model_type"] = pd.Categorical(
-        subset["Model_type"], categories=model_order, ordered=True
+    subset["model_type"] = pd.Categorical(
+        subset["model_type"], categories=model_order, ordered=True
     )
     subset["prompt_type"] = pd.Categorical(
         subset["prompt_type"], categories=prompt_order, ordered=True
     )
-    subset.sort_values(["Model_type", "prompt_type"], inplace=True)
+    subset.sort_values(["model_type", "prompt_type"], inplace=True)
 
     # 创建图形
     plt.figure(figsize=figsize, dpi=dpi)
@@ -653,7 +661,9 @@ def get_f1_vs_iou_threshold_data(mid_frame):
     return data_pivot
 
 
-def plot_memory_by_obj_num(save_path=None, figsize=(6, 4), dpi=300, model_type=None):
+def plot_memory_by_obj_num(
+    save_path=None, figsize=(6, 4), dpi=300, model_type=None, style="default"
+):
     """
     绘制符合SCI期刊标准的折线图，展示不同 prompt_type、mid_frame 的 max_memory_usage 随 obj_num 变化
 
@@ -661,7 +671,41 @@ def plot_memory_by_obj_num(save_path=None, figsize=(6, 4), dpi=300, model_type=N
         save_path: 图片保存路径(可选)
         figsize: 图像尺寸(英寸)
         dpi: 分辨率
+        model_type: 模型类型 (可选)
+        style: 样式类型 ("default" 或 "large")
     """
+    # 设置不同样式的字体大小和符号等参数
+    if style == "large":
+        font_settings = {
+            "font.family": "Arial",  # 或 'Times New Roman'
+            "font.size": 14,
+            "axes.labelsize": 16,
+            "axes.titlesize": 18,
+            "xtick.labelsize": 14,
+            "ytick.labelsize": 14,
+            "legend.fontsize": 14,
+            "lines.linewidth": 2,
+            "lines.markersize": 8,
+            "xtick.major.width": 1.0,
+            "ytick.major.width": 1.0,
+            "axes.linewidth": 1.0,
+        }
+    else:
+        font_settings = {
+            "font.family": "Arial",  # 或 'Times New Roman'
+            "font.size": 9,
+            "axes.labelsize": 10,
+            "axes.titlesize": 11,
+            "xtick.labelsize": 9,
+            "ytick.labelsize": 9,
+            "legend.fontsize": 9,
+            "lines.linewidth": 1.5,
+            "lines.markersize": 6,
+            "xtick.major.width": 0.8,
+            "ytick.major.width": 0.8,
+            "axes.linewidth": 0.8,
+        }
+
     # Step 1: Read the data from log.csv
     df = pd.read_csv("log.csv")
     print(df.head())
@@ -686,7 +730,7 @@ def plot_memory_by_obj_num(save_path=None, figsize=(6, 4), dpi=300, model_type=N
     # print("\n双数行数据:")
     # print(even_rows.head())
 
-    print(df[df["prompt_type"] == "box"].head())
+    # print(df[df["prompt_type"] == "box"].head())
 
     # Step 2: Ensure numeric types for relevant columns
     df["obj_num"] = pd.to_numeric(df["obj_num"], errors="coerce")
@@ -697,27 +741,20 @@ def plot_memory_by_obj_num(save_path=None, figsize=(6, 4), dpi=300, model_type=N
         subset=["obj_num", "max_memory_usage", "prompt_type", "mid_frame"], inplace=True
     )
 
+    print(df.to_string())
+
     # Step 3: 设置SCI期刊推荐的样式
     plt.style.use("default")  # 重置为默认样式
     plt.rcParams.update(
         {
-            "font.family": "Arial",
-            "font.size": 9,
-            "axes.labelsize": 10,
-            "axes.titlesize": 11,
-            "xtick.labelsize": 9,
-            "ytick.labelsize": 9,
-            "legend.fontsize": 9,
-            "figure.dpi": dpi,
-            "savefig.dpi": dpi,
-            "savefig.bbox": "tight",
-            "axes.linewidth": 0.8,
-            "lines.linewidth": 1.5,
-            "lines.markersize": 6,
-            "xtick.major.width": 0.8,
-            "ytick.major.width": 0.8,
-            "grid.linewidth": 0.6,
-            "grid.alpha": 0.4,
+            **{
+                "figure.dpi": dpi,
+                "savefig.dpi": dpi,
+                "savefig.bbox": "tight",
+                "grid.linewidth": 0.6,
+                "grid.alpha": 0.4,
+            },
+            **font_settings,
         }
     )
 
@@ -769,13 +806,13 @@ def plot_memory_by_obj_num(save_path=None, figsize=(6, 4), dpi=300, model_type=N
     # 图例放在左上
 
     ax.legend(
-        title="Prompt Type",
+        # title="Prompt Type",
         frameon=True,
         edgecolor="black",
         facecolor="white",
         loc="upper left",
         bbox_to_anchor=(0, 1),
-        fontsize=8,
+        fontsize=8 if style == "default" else 11,
         ncol=1,
     )
 
@@ -1295,8 +1332,10 @@ def plot_timecost_by_obj_num_new(save_path=None, figsize=(6, 4), dpi=300, show_c
 # 示例：绘制mid_frame=x时的曲线
 # plot_f1_by_iou_threshold(mid_frame_value=0, save_path="f1_by_iou_midframe0.jpg")
 
-# 绘制所有prompt_type的综合比较
+###### 绘制所有prompt_type的综合比较 ######
+# df = pd.read_csv("test_output.csv")
 # plot_sci_style_barchart(
+#     df,
 #     iou_threshold=0.5,
 #     mid_frame=1,
 #     save_path="sci_style_barchart.png",
@@ -1306,7 +1345,7 @@ def plot_timecost_by_obj_num_new(save_path=None, figsize=(6, 4), dpi=300, show_c
 
 ###### 绘制mid_frame=x时的曲线
 # df = pd.read_csv("./charts/output.csv")
-df = pd.read_csv("test_output.csv")
+# df = pd.read_csv("test_output.csv")
 # for mid_frame_value in [1, 2, 3]:
 #     for prompt_type in ["box", "points", "mask"]:
 #         for diff_frame_num in [1, -1]:
@@ -1380,10 +1419,12 @@ df = pd.read_csv("test_output.csv")
 # result_data.to_csv("f1_vs_iou_threshold_midframe0_data.csv", index=False)
 
 # 绘制不同prompt_type、不同obj_num的显存占用对比
-# output_dir = "output_plot"
-# for model_type in ["t", "s", "b+", "l"]:
-#     save_path = os.path.join(output_dir, f"plot_memory_by_obj_num_{model_type}.png")
-#     plot_memory_by_obj_num(save_path=save_path, model_type=model_type)
+output_dir = "output_plot"
+for model_type in ["t", "s", "b+", "l"]:
+    save_path = os.path.join(
+        output_dir, f"plot_memory_by_obj_num_{model_type}_large.png"
+    )
+    plot_memory_by_obj_num(save_path=save_path, model_type=model_type, style="large")
 
 # # 绘制不同prompt_type、不同obj_num的时间对比
 # save_path = os.path.join(output_dir, "plot_timecost_by_obj_num.png")
@@ -1410,29 +1451,29 @@ df = pd.read_csv("test_output.csv")
 # even_rows.to_csv("even_rows.csv", index=False)
 
 ###### 计算平均值 ######
-# 读取CSV文件
-df = pd.read_csv("even_rows.csv")  # 替换为你的CSV文件路径
+# # 读取CSV文件
+# df = pd.read_csv("even_rows.csv")  # 替换为你的CSV文件路径
 
-# 指定要过滤的条件（可以根据需要修改）
-model_type_filter = "t"  # 示例 model_type
-mid_frame_filter = 1  # 示例 mid_frame
-prompt_type_filter = "box"  # 示例 prompt_type
-obj_num_filter = 100  # 示例 obj_num
+# # 指定要过滤的条件（可以根据需要修改）
+# model_type_filter = "t"  # 示例 model_type
+# mid_frame_filter = 1  # 示例 mid_frame
+# prompt_type_filter = "box"  # 示例 prompt_type
+# obj_num_filter = 100  # 示例 obj_num
 
-# 应用过滤条件
-filtered_data = df[
-    (df["model_type"] == model_type_filter)
-    & (df["mid_frame"] == mid_frame_filter)
-    & (df["prompt_type"] == prompt_type_filter)
-    & (df["obj_num"] == obj_num_filter)
-    & (df["time_cost"] < 2)
-]
-print(filtered_data.head())
+# # 应用过滤条件
+# filtered_data = df[
+#     (df["model_type"] == model_type_filter)
+#     & (df["mid_frame"] == mid_frame_filter)
+#     & (df["prompt_type"] == prompt_type_filter)
+#     & (df["obj_num"] == obj_num_filter)
+#     & (df["time_cost"] < 2)
+# ]
+# print(filtered_data.head())
 
-# 计算 time_cost 的平均值
-average_time_cost = filtered_data["time_cost"].mean()
+# # 计算 time_cost 的平均值
+# average_time_cost = filtered_data["time_cost"].mean()
 
-# 输出结果
-print(f"符合条件的 time_cost 平均值为: {average_time_cost}")
+# # 输出结果
+# print(f"符合条件的 time_cost 平均值为: {average_time_cost}")
 
 ###### End ######
