@@ -361,7 +361,9 @@ def test(
     img_names = [p for p in os.listdir(T1) if os.path.splitext(p)[-1] in [".png"]]
 
     # 获取prompt的文件夹名称
-    if label_type != "sam2":
+    if label_type == "whu":
+        prompt_folder_name = "whu_prompt"
+    elif label_type != "sam2":
         prompt_folder_name = os.path.normpath(T2_label).split(os.sep)[-2]
         prompt_folder_name = prompt_folder_name.split("_", 1)[1]
     else:
@@ -370,14 +372,16 @@ def test(
 
     output_dir = f"./logs/{dataset_name}/generate_{model_type}_{prompt_type}_mid{mid_frame}_{diff_frame_num}_iou{iou_threshold}/{prompt_folder_name}"
 
-    # 存在的文件夹则跳过
+    # 存在的文件夹则读取已完成文件
     if os.path.isdir(output_dir):
         print(f"{output_dir} 已存在")
-        return
+        # return
+        before_imgs = os.listdir(output_dir)
     else:
         os.makedirs(output_dir, exist_ok=True)
+        before_imgs = []
 
-    with open(os.path.join(output_dir, "log.txt"), "w", encoding="utf-8") as f:
+    with open(os.path.join(output_dir, "log.txt"), "a", encoding="utf-8") as f:
         F1_meter = AverageMeter()
         IoU_meter = AverageMeter()
         Acc_meter = AverageMeter()
@@ -385,6 +389,13 @@ def test(
         Rec_meter = AverageMeter()
 
         for idx, img_name in enumerate(img_names):
+            # 跳过已存在的文件
+            if img_name in before_imgs:
+                print(f"Skipping image {idx+1}/{len(img_names)}: {img_name}")
+                continue
+            else:
+                print(f"Processing image {idx+1}/{len(img_names)}: {img_name}")
+
             predictor = build_sam2_video_predictor(
                 model_cfg, sam2_checkpoint, device=device
             )
@@ -406,6 +417,244 @@ def test(
 
             diff_mask = sum_masks_dict(*diff_mask_list, iou_threshold=iou_threshold)
 
+            # 读取标签图（单通道）
+            label_mask = cv2.imread(
+                os.path.join(diff_label_dir, img_name), cv2.IMREAD_GRAYSCALE
+            )
+            # iou = compute_mask_iou(diff_mask, label_mask)
+            acc, precision, recall, f1, iou = binary_accuracy(diff_mask, label_mask)
+
+            F1_meter.update(f1)
+            Acc_meter.update(acc)
+            IoU_meter.update(iou)
+            Pre_meter.update(precision)
+            Rec_meter.update(recall)
+
+            print(
+                f"{idx+1}/{len(img_names)} iou: {iou} f1: {f1} pre: {precision} rec: {recall} acc:{format(acc*100,'.2f')}"
+            )
+            f.write(
+                f"{idx+1}/{len(img_names)} f1: {format(f1*100,'.2f')} iou: {format(iou*100,'.2f')} pre: {format(precision*100,'.2f')} rec: {format(recall*100,'.2f')} acc:{format(acc*100,'.2f')} name: {img_name}\n"
+            )
+
+            # 保存mask
+            h, w = diff_mask.shape[-2:]
+            mask_image = diff_mask.reshape(h, w, 1)
+            cv2.imwrite(os.path.join(output_dir, img_name), mask_image * 255)
+
+            if "predictor" in locals():
+                del predictor
+            torch.cuda.empty_cache()
+            gc.collect()
+
+        try:
+            print(
+                f"平均值 iou: {IoU_meter.avg} f1: {F1_meter.avg} pre: {Pre_meter.avg} rec: {Rec_meter.avg} acc:{Acc_meter.avg}"
+            )
+            f.write(
+                f"平均值 iou: {IoU_meter.avg} f1: {F1_meter.avg} pre: {Pre_meter.avg} rec: {Rec_meter.avg} acc:{Acc_meter.avg}"
+            )
+        except statistics.StatisticsError:
+            print("列表为空，无法计算平均值")
+
+
+# 消融实验
+def ablation_study(
+    model_type,
+    mid_frame,
+    diff_frame_num,
+    iou_threshold,
+    T1,
+    T2,
+    diff_label_dir,
+    T1_label,
+    T2_label,
+    dataset_name,
+    label_type="levir",
+    prompt_type="box",
+):
+    model_obj = {
+        "t": {
+            "checkpoint": "sam2.1_hiera_tiny.pt",
+            "config": "sam2.1_hiera_t.yaml",
+        },
+        "s": {
+            "checkpoint": "sam2.1_hiera_small.pt",
+            "config": "sam2.1_hiera_s.yaml",
+        },
+        "b+": {
+            "checkpoint": "sam2.1_hiera_base_plus.pt",
+            "config": "sam2.1_hiera_b+.yaml",
+        },
+        "l": {
+            "checkpoint": "sam2.1_hiera_large.pt",
+            "config": "sam2.1_hiera_l.yaml",
+        },
+    }
+    checkpoint = model_obj[model_type]["checkpoint"]
+    config = model_obj[model_type]["config"]
+    # 加载SAM2 video predictor
+    sam2_checkpoint = os.path.join("E:/CD_Checkpoints", checkpoint)
+    model_cfg = os.path.join(
+        "E:/CD_projects/sam2-cd-no-training/sam2/configs/sam2.1", config
+    )
+
+    # 输入前后时相图片
+    # T1 = kwargs.get("T1", None)
+    # T2 = kwargs.get("T2", None)
+    # diff_label_dir = kwargs.get("diff_label_dir", None)
+    # T1_label = kwargs.get("T1_label", None)
+    # T2_label = kwargs.get("T2_label", None)
+
+    if None in [T1, T2, diff_label_dir, T1_label, T2_label]:
+        print("请输入前后时相图片路径和标签路径")
+        return
+
+    # 读取前后时相路径中的所有文件名
+    img_names = [p for p in os.listdir(T1) if os.path.splitext(p)[-1] in [".png"]]
+
+    # 获取prompt的文件夹名称
+    if label_type == "whu":
+        prompt_folder_name = "whu_prompt"
+    elif label_type != "sam2":
+        prompt_folder_name = os.path.normpath(T2_label).split(os.sep)[-2]
+        prompt_folder_name = prompt_folder_name.split("_", 1)[1]
+    else:
+        prompt_folder_name = os.path.normpath(T2_label).split(os.sep)[-1]
+        prompt_folder_name = prompt_folder_name.split("_", 1)[1]
+
+    # output_dir = f"./logs/{dataset_name}/generate_{model_type}_{prompt_type}_mid{mid_frame}_{diff_frame_num}_iou{iou_threshold}/{prompt_folder_name}"
+    output_dir = "./logs/ablation_study/pipline_B"
+    # 存在的文件夹则读取已完成文件
+    if os.path.isdir(output_dir):
+        print(f"{output_dir} 已存在")
+        # return
+        before_imgs = os.listdir(output_dir)
+    else:
+        os.makedirs(output_dir, exist_ok=True)
+        before_imgs = []
+
+    with open(os.path.join(output_dir, "log.txt"), "a", encoding="utf-8") as f:
+        F1_meter = AverageMeter()
+        IoU_meter = AverageMeter()
+        Acc_meter = AverageMeter()
+        Pre_meter = AverageMeter()
+        Rec_meter = AverageMeter()
+
+        for idx, img_name in enumerate(img_names):
+            # 跳过已存在的文件
+            if img_name in before_imgs:
+                print(f"Skipping image {idx+1}/{len(img_names)}: {img_name}")
+                continue
+            else:
+                print(f"Processing image {idx+1}/{len(img_names)}: {img_name}")
+
+            predictor = build_sam2_video_predictor(
+                model_cfg, sam2_checkpoint, device=device
+            )
+
+            diff_mask_list = step_one(
+                img_name,
+                T1,
+                T2,
+                T1_label,
+                T2_label,
+                predictor,
+                label_type=label_type,
+                mid_frame=mid_frame,
+                diff_frame_num=diff_frame_num,
+                iou_threshold=iou_threshold,
+                prompt_type=prompt_type,
+                # prompts=prompts,
+            )
+
+            import matplotlib.pyplot as plt
+
+            # 计算asc的mask
+            diff_mask_list_asc = diff_mask_list[0]
+            len_diff_mask_list = len(diff_mask_list_asc)
+            if len(diff_mask_list_asc) == 0:
+                asc_mask = np.zeros((1, 1024, 1024), dtype=np.uint8)
+            elif len(diff_mask_list_asc) == 1:
+                asc_mask = sum_masks_dict(diff_mask_list_asc[0])
+            else:
+                asc_mask_1 = sum_masks_dict(
+                    diff_mask_list_asc[
+                        0 if diff_frame_num != -1 else len_diff_mask_list - 2
+                    ]
+                )
+                asc_mask_2 = sum_masks_dict(diff_mask_list_asc[len_diff_mask_list - 1])
+                asc_mask = np.abs(asc_mask_1 - asc_mask_2)
+
+                # # 创建一个绘图窗口并绘制三个子图
+                # plt.figure(figsize=(15, 5))  # 设置窗口大小
+
+                # # 绘制 asc_mask_1
+                # plt.subplot(1, 3, 1)
+                # plt.imshow(asc_mask_1.squeeze(0), cmap="gray")
+                # plt.title("asc_mask_1")
+                # plt.axis("off")
+
+                # # 绘制 asc_mask_2
+                # plt.subplot(1, 3, 2)
+                # plt.imshow(asc_mask_2.squeeze(0), cmap="gray")
+                # plt.title("asc_mask_2")
+                # plt.axis("off")
+
+                # # 绘制 asc_mask
+                # plt.subplot(1, 3, 3)
+                # plt.imshow(asc_mask.squeeze(0), cmap="gray")
+                # plt.title("asc_mask")
+                # plt.axis("off")
+
+                # # 展示图像
+                # plt.tight_layout()
+                # plt.show()
+
+            # 计算desc的mask
+            diff_mask_list_desc = diff_mask_list[1]
+            len_diff_mask_list = len(diff_mask_list_desc)
+            if len(diff_mask_list_desc) == 0:
+                desc_mask = np.zeros((1, 1024, 1024), dtype=np.uint8)
+            elif len(diff_mask_list_desc) == 1:
+                desc_mask = sum_masks_dict(diff_mask_list_desc[0])
+            else:
+                desc_mask_1 = sum_masks_dict(
+                    diff_mask_list_desc[
+                        0 if diff_frame_num != -1 else len_diff_mask_list - 2
+                    ]
+                )
+                desc_mask_2 = sum_masks_dict(
+                    diff_mask_list_desc[len_diff_mask_list - 1]
+                )
+                desc_mask = np.abs(desc_mask_1 - desc_mask_2)
+
+                # 创建一个绘图窗口并绘制三个子图
+                # plt.figure(figsize=(15, 5))  # 设置窗口大小
+
+                # # 绘制 asc_mask_1
+                # plt.subplot(1, 3, 1)
+                # plt.imshow(desc_mask_1.squeeze(0), cmap="gray")
+                # plt.title("desc_mask_1")
+                # plt.axis("off")
+
+                # # 绘制 asc_mask_2
+                # plt.subplot(1, 3, 2)
+                # plt.imshow(desc_mask_2.squeeze(0), cmap="gray")
+                # plt.title("desc_mask_2")
+                # plt.axis("off")
+
+                # # 绘制 asc_mask
+                # plt.subplot(1, 3, 3)
+                # plt.imshow(desc_mask.squeeze(0), cmap="gray")
+                # plt.title("desc_mask")
+                # plt.axis("off")
+
+                # # 展示图像
+                # plt.tight_layout()
+                # plt.show()
+
+            diff_mask = np.logical_or(asc_mask, desc_mask) * 255
             # 读取标签图（单通道）
             label_mask = cv2.imread(
                 os.path.join(diff_label_dir, img_name), cv2.IMREAD_GRAYSCALE
@@ -486,17 +735,32 @@ def test(
 #     )
 
 if __name__ == "__main__":
-    test(
+    # test(
+    #     "b+",
+    #     1,
+    #     1,
+    #     0.5,
+    #     "E:/CD_datasets/WHU-CD/test/A",
+    #     "E:/CD_datasets/WHU-CD/test/B",
+    #     "E:/CD_datasets/WHU-CD/test/label",
+    #     "E:/CD_datasets/WHU-CD/before_label/",
+    #     "E:/CD_datasets/WHU-CD/after_label/",
+    #     dataset_name="WHU-CD",
+    #     label_type="whu",
+    #     prompt_type="box",
+    # )
+
+    ablation_study(
         "b+",
         1,
         -1,
         0.5,
-        "E:/CD_datasets/LEVIR-CD/test/A",
-        "E:/CD_datasets/LEVIR-CD/test/B",
-        "E:/CD_datasets/LEVIR-CD/test/label",
-        "E:/CD_datasets/LEVIR-CD/test/sam2/A_sam2_coco_rle_b+",
-        "E:/CD_datasets/LEVIR-CD/test/sam2/B_sam2_coco_rle_b+",
-        dataset_name="LEVIR-CD",
-        label_type="sam2",
-        prompt_type="mask",
+        "E:/CD_datasets/WHU-CD/test/A",
+        "E:/CD_datasets/WHU-CD/test/B",
+        "E:/CD_datasets/WHU-CD/test/label",
+        "E:/CD_datasets/WHU-CD/before_label/",
+        "E:/CD_datasets/WHU-CD/after_label/",
+        dataset_name="WHU-CD",
+        label_type="whu",
+        prompt_type="box",
     )
